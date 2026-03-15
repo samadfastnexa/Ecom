@@ -1,0 +1,236 @@
+{% extends "admin/change_form.html" %}
+{% load static %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .password-display-section {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        padding: 15px;
+        margin: 15px 0;
+    }
+
+    .password-display-section h3 {
+        margin-top: 0;
+        color: #333;
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    .password-hash {
+        font-family: 'Courier New', monospace;
+        background: #fff;
+        border: 1px solid #ccc;
+        padding: 10px;
+        border-radius: 3px;
+        word-break: break-all;
+        font-size: 12px;
+        color: #666;
+        margin: 10px 0;
+    }
+
+    .password-actions {
+        margin-top: 15px;
+    }
+
+    .password-btn {
+        background: #417690;
+        color: white;
+        border: none;
+        padding: 8px 15px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 13px;
+        margin-right: 10px;
+        margin-bottom: 5px;
+        transition: background 0.3s;
+    }
+
+    .password-btn:hover {
+        background: #2d5468;
+    }
+
+    .password-btn.toggle {
+        background: #6c757d;
+    }
+
+    .password-btn.toggle:hover {
+        background: #5a6268;
+    }
+
+    .password-btn.danger {
+        background: #dc3545;
+    }
+
+    .password-btn.danger:hover {
+        background: #c82333;
+    }
+
+    .password-info {
+        font-size: 12px;
+        color: #666;
+        margin-top: 10px;
+        font-style: italic;
+    }
+
+    .quick-password-section {
+        margin-top: 15px;
+        padding-top: 15px;
+        border-top: 1px solid #dee2e6;
+    }
+
+    .quick-password-section h4 {
+        font-size: 13px;
+        color: #555;
+        margin-bottom: 10px;
+    }
+</style>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        console.log('Password display script loaded');
+
+        // Find the password field - Django uses a readonly div with class 'readonly'
+        // Look for the Password row in the form
+        const passwordRows = document.querySelectorAll('.form-row');
+        let passwordHash = '';
+        let insertAfter = null;
+
+        // Search for password field in the form
+        passwordRows.forEach(row => {
+            const label = row.querySelector('label');
+            if (label && label.textContent.includes('Password')) {
+                console.log('Found password row:', row);
+                const readonlyDiv = row.querySelector('.readonly');
+                if (readonlyDiv) {
+                    passwordHash = readonlyDiv.textContent.trim();
+                    insertAfter = row;
+                    console.log('Password hash:', passwordHash);
+                }
+            }
+        });
+
+        // If we found the password field, create the display section
+        if (insertAfter) {
+            console.log('Creating password display section');
+
+            // Create password display section
+            const passwordSection = document.createElement('div');
+            passwordSection.className = 'password-display-section';
+            passwordSection.innerHTML = `
+            <h3>🔐 Password Information</h3>
+            <div class="password-hash" id="passwordHashDisplay">${passwordHash || 'No password set'}</div>
+            <div class="password-actions">
+                <button type="button" class="password-btn toggle" onclick="togglePasswordVisibility()">
+                    👁️ Toggle Hash Format
+                </button>
+            </div>
+            <p class="password-info">
+                ℹ️ Django stores passwords as secure hashes. The original password cannot be retrieved.
+            </p>
+            
+            <div class="quick-password-section">
+                <h4>⚡ Quick Password Reset (for testing)</h4>
+                <button type="button" class="password-btn" onclick="setPassword('123456')">
+                    Set to: 123456
+                </button>
+                <button type="button" class="password-btn" onclick="setPassword('Password123!')">
+                    Set to: Password123!
+                </button>
+                <button type="button" class="password-btn" onclick="setPassword('deliveryboy1')">
+                    Set to: deliveryboy1
+                </button>
+                <button type="button" class="password-btn danger" onclick="generateRandomPassword()">
+                    🎲 Generate Random
+                </button>
+            </div>
+        `;
+
+            // Insert after the password field row
+            insertAfter.after(passwordSection);
+            console.log('Password display section inserted');
+        } else {
+            console.log('Password field not found');
+        }
+    });
+
+    let hashFormatExpanded = false;
+
+    function togglePasswordVisibility() {
+        const hashDisplay = document.getElementById('passwordHashDisplay');
+
+        if (!hashDisplay) return;
+
+        const hash = hashDisplay.textContent.trim();
+
+        if (!hash || hash === 'No password set') {
+            return;
+        }
+
+        if (hashFormatExpanded) {
+            // Show compact format
+            const readonlyDiv = document.querySelector('.form-row label:contains("Password")');
+            if (readonlyDiv) {
+                const originalHash = readonlyDiv.closest('.form-row').querySelector('.readonly').textContent.trim();
+                hashDisplay.textContent = originalHash;
+            }
+            hashFormatExpanded = false;
+        } else {
+            // Show expanded format with line breaks
+            const parts = hash.split('$');
+            if (parts.length >= 4) {
+                const formatted = `
+Algorithm: ${parts[0]}
+Iterations: ${parts[1]}
+Salt: ${parts[2]}
+Hash: ${parts[3]}
+            `.trim();
+                hashDisplay.innerHTML = formatted.replace(/\n/g, '<br>');
+            }
+            hashFormatExpanded = true;
+        }
+    }
+
+    function setPassword(password) {
+        if (!confirm(`Set password to: "${password}"?\n\nThis will update the user's password immediately when you save.`)) {
+            return;
+        }
+
+        // Find the password input fields
+        const password1 = document.querySelector('input[name="password1"]');
+        const password2 = document.querySelector('input[name="password2"]');
+
+        if (password1 && password2) {
+            password1.value = password;
+            password2.value = password;
+            alert(`Password set to: "${password}"\n\nClick "Save" to apply the changes.`);
+        } else {
+            // If password fields not found, show link to change password page
+            const changePasswordLink = document.querySelector('a[href*="password"]');
+            if (changePasswordLink) {
+                if (confirm(`Password fields not found on this page.\n\nWould you like to go to the password change page?`)) {
+                    window.location.href = changePasswordLink.href;
+                }
+            } else {
+                alert('Password fields not found. Please use the "Change password" link in the user form.');
+            }
+        }
+    }
+
+    function generateRandomPassword() {
+        const length = 12;
+        const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+        let password = '';
+
+        for (let i = 0; i < length; i++) {
+            password += charset.charAt(Math.floor(Math.random() * charset.length));
+        }
+
+        if (confirm(`Generated password: ${password}\n\nSet this as the new password?`)) {
+            setPassword(password);
+        }
+    }
+</script>
+{% endblock %}

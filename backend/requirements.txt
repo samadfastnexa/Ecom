@@ -1,0 +1,20 @@
+# Django Core
+Django==6.0.1
+asgiref==3.11.0
+sqlparse==0.5.5
+tzdata==2025.3
+
+# Django REST Framework
+djangorestframework==3.16.1
+djangorestframework-simplejwt==5.4.0
+
+# CORS Headers for API access
+django-cors-headers==4.6.0
+
+# Image Processing
+Pillow==12.1.0
+
+# Additional dependencies (add as needed)
+# python-decouple==3.8  # For environment variables
+# psycopg2-binary==2.9.9  # For PostgreSQL
+# gunicorn==21.2.0  # For production deployment

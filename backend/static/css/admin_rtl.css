@@ -1,0 +1,21 @@
+/* RTL Support for Urdu text in Django Admin */
+
+/* Apply RTL to specific fields in the change list and form */
+.field-text_ur, 
+.field-text_ur input, 
+.field-text_ur textarea {
+    direction: rtl;
+    text-align: right;
+    font-family: 'Tahoma', 'Arial', sans-serif; /* Use a font that renders Urdu well */
+}
+
+/* Ensure the label remains LTR if desired, or let it follow context */
+.field-text_ur label {
+    /* text-align: left; */ /* Uncomment if labels should remain left-aligned */
+}
+
+/* In the change list (table view) */
+td.field-text_ur {
+    direction: rtl;
+    text-align: right;
+}

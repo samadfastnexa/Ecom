@@ -1,0 +1,12 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+    <div>
+        <h1>Import Translations</h1>
+        <p>Upload a CSV file with columns: <code>slug, category_name, text_en, text_ur</code></p>
+        <form action="." method="POST" enctype="multipart/form-data">
+            {{ form.as_p }}
+            {% csrf_token %}
+            <input type="submit" value="Upload CSV" class="default" />
+        </form>
+    </div>
+{% endblock %}
