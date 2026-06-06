@@ -19,6 +19,11 @@ class UserProfile(models.Model):
     vehicle_type = models.CharField(max_length=50, blank=True, null=True)
     vehicle_number = models.CharField(max_length=50, blank=True, null=True)
     expo_push_token = models.CharField(max_length=255, blank=True, null=True)
+    custom_bottle_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Custom per-bottle price for this customer; "
+                  "falls back to the standard price when empty",
+    )
 
     def __str__(self):
         return f"{self.user.username} - {self.get_user_type_display()}"

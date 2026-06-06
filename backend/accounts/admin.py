@@ -160,17 +160,21 @@ class CustomUserAdmin(UserAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'user_type', 'phone_number', 'is_available', 'vehicle_type')
+    list_display = ('user', 'user_type', 'phone_number', 'custom_bottle_price', 'is_available', 'vehicle_type')
     list_filter = ('user_type', 'is_available', 'vehicle_type')
     search_fields = ('user__username', 'user__email', 'phone_number', 'vehicle_number')
-    list_editable = ('user_type', 'is_available')
-    
+    list_editable = ('user_type', 'custom_bottle_price', 'is_available')
+
     fieldsets = (
         ('User Information', {
             'fields': ('user', 'user_type', 'expo_push_token')
         }),
+        ('Plant Pricing', {
+            'fields': ('custom_bottle_price',),
+            'description': 'Optional per-bottle price for this customer. Leave blank to use the standard price.',
+        }),
         ('Delivery Boy Details', {
-            'fields': ('phone_number', 'address', 'is_available', 'current_location', 
+            'fields': ('phone_number', 'address', 'is_available', 'current_location',
                       'vehicle_type', 'vehicle_number'),
             'classes': ('collapse',)
         }),

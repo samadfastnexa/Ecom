@@ -1,0 +1,9 @@
+# Local environment configuration (keep .env.example as the template)
+.env
+
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc

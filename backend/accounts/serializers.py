@@ -57,9 +57,18 @@ class UserSerializer(serializers.ModelSerializer):
     is_available = serializers.BooleanField(source='profile.is_available', read_only=True)
     vehicle_type = serializers.CharField(source='profile.vehicle_type', read_only=True)
     vehicle_number = serializers.CharField(source='profile.vehicle_number', read_only=True)
-    
+    is_staff = serializers.BooleanField(read_only=True)
+    can_manage_plant = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'first_name', 'last_name', 
-                  'user_type', 'phone_number', 'address', 'is_available', 
-                  'vehicle_type', 'vehicle_number')
+        fields = ('id', 'username', 'email', 'first_name', 'last_name',
+                  'user_type', 'phone_number', 'address', 'is_available',
+                  'vehicle_type', 'vehicle_number', 'is_staff', 'can_manage_plant')
+
+    def get_can_manage_plant(self, obj):
+        return (
+            obj.is_superuser
+            or obj.is_staff
+            or obj.has_perm('plant.view_deliveryrecord')
+        )
