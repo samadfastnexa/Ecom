@@ -35,11 +35,7 @@ export function ProductCatalog() {
       <section>
         {error ? (
           <Card className="border-rose-400/30 p-6 text-center text-rose-200">
-            {error}
-            <p className="mt-1 text-sm text-mist/50">
-              Make sure the Django backend is running on{" "}
-              <code>{process.env.NEXT_PUBLIC_API_URL}</code>.
-            </p>
+            Unable to load products. Please try again later.
           </Card>
         ) : loading ? (
           <ProductGridSkeleton />

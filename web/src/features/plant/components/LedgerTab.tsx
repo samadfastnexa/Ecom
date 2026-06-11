@@ -16,8 +16,12 @@ import { RecordsTable } from "./RecordsTable";
 export function LedgerTab({ range }: { range: PlantFilters }) {
   const settings = usePlantSettings();
   const customers = usePlantCustomers();
+  // Active-only types for the "add new record" form
   const customerTypes = usePlantCustomerTypes(true);
   const bottleTypes = usePlantBottleTypes(true);
+  // All types (including inactive) for editing existing records
+  const allCustomerTypes = usePlantCustomerTypes(false);
+  const allBottleTypes = usePlantBottleTypes(false);
   const records = usePlantRecords(range);
   const summary = usePlantSummary(range);
 
@@ -49,8 +53,8 @@ export function LedgerTab({ range }: { range: PlantFilters }) {
             loading={records.loading}
             error={records.error}
             customers={customers.data ?? []}
-            customerTypes={customerTypes.data ?? []}
-            bottleTypes={bottleTypes.data ?? []}
+            customerTypes={allCustomerTypes.data ?? []}
+            bottleTypes={allBottleTypes.data ?? []}
             onChanged={reloadLedger}
           />
         </div>

@@ -14,6 +14,9 @@ import {
   X,
   Factory,
   Settings,
+  ClipboardList,
+  Bike,
+  Users,
 } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
@@ -53,7 +56,7 @@ export function Navbar() {
             <Droplets size={20} className="text-white" />
           </span>
           <span className="text-lg font-bold tracking-tight text-mist">
-            Aqua<span className="text-wave">Shop</span>
+            Century<span className="text-wave"> Sip</span>
           </span>
         </Link>
 
@@ -99,13 +102,33 @@ export function Navbar() {
                 {user.first_name || user.username}
               </Link>
               {user.is_staff && (
-                <Link
-                  href="/settings"
-                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-mist/80 transition hover:bg-white/10 hover:text-wave"
-                  aria-label="Settings"
-                >
-                  <Settings size={18} />
-                </Link>
+                <>
+                  <Link
+                    href="/manage/orders"
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm transition hover:bg-white/10",
+                      isActive("/manage/orders") ? "text-wave" : "text-mist/80"
+                    )}
+                  >
+                    <ClipboardList size={16} /> Orders
+                  </Link>
+                  <Link
+                    href="/manage/staff"
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm transition hover:bg-white/10",
+                      isActive("/manage/staff") ? "text-wave" : "text-mist/80"
+                    )}
+                  >
+                    <Users size={16} /> Staff
+                  </Link>
+                  <Link
+                    href="/settings"
+                    className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-mist/80 transition hover:bg-white/10 hover:text-wave"
+                    aria-label="Settings"
+                  >
+                    <Settings size={18} />
+                  </Link>
+                </>
               )}
               <button
                 onClick={handleLogout}
@@ -158,13 +181,29 @@ export function Navbar() {
                   <User size={16} /> {user.first_name || user.username}
                 </Link>
                 {user.is_staff && (
-                  <Link
-                    href="/settings"
-                    onClick={() => setOpen(false)}
-                    className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-mist/80"
-                  >
-                    <Settings size={16} /> Settings
-                  </Link>
+                  <>
+                    <Link
+                      href="/manage/orders"
+                      onClick={() => setOpen(false)}
+                      className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-mist/80"
+                    >
+                      <ClipboardList size={16} /> Orders (Admin)
+                    </Link>
+                    <Link
+                      href="/manage/staff"
+                      onClick={() => setOpen(false)}
+                      className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-mist/80"
+                    >
+                      <Users size={16} /> Staff
+                    </Link>
+                    <Link
+                      href="/settings"
+                      onClick={() => setOpen(false)}
+                      className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-mist/80"
+                    >
+                      <Settings size={16} /> Settings
+                    </Link>
+                  </>
                 )}
                 <button
                   onClick={() => {

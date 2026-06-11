@@ -43,7 +43,9 @@ export type PaymentMethod = "COD" | "JazzCash" | "EasyPaisa";
 
 export interface Order {
   id: number;
-  user: string;
+  user?: string | null;
+  guest_name?: string | null;
+  guest_phone?: string | null;
   items: OrderItem[];
   total_price: string;
   status: OrderStatus;
@@ -51,10 +53,18 @@ export interface Order {
   payment_method: PaymentMethod;
   payment_number?: string | null;
   is_paid: boolean;
+  is_hidden?: boolean;
   created_at: string;
+  assigned_delivery_boy?: number | null;
   assigned_delivery_boy_name?: string | null;
+  delivery_notes?: string | null;
   number_of_bottles?: number;
   delivery_status?: string;
+  delivery_status_updated_at?: string | null;
+  delivery_assigned_at?: string | null;
+  delivery_completed_at?: string | null;
+  cash_received?: boolean;
+  cash_amount?: string;
 }
 
 export type ComplaintStatus = "PENDING" | "IN_PROGRESS" | "RESOLVED";
@@ -79,6 +89,7 @@ export interface UserProfile {
   is_available: boolean;
   vehicle_type: string | null;
   vehicle_number: string | null;
+  account_balance: string; // decimal string from API, positive = credit, negative = owes
   is_staff: boolean;
   can_manage_plant: boolean;
 }
@@ -219,6 +230,19 @@ export interface RegisterPayload {
   last_name?: string;
 }
 
+export interface UpdateProfilePayload {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone_number?: string | null;
+  address?: string | null;
+}
+
+export interface ChangePasswordPayload {
+  old_password: string;
+  new_password: string;
+}
+
 export interface CreateOrderItemInput {
   product_id: number;
   quantity: number;
@@ -237,6 +261,173 @@ export interface ComplaintInput {
   subject: string;
   description: string;
 }
+
+/* ---------- Admin order management ---------- */
+
+export interface AdminOrder extends Order {
+  customer_name: string;
+  customer_email: string;
+  customer_phone: string | null;
+  customer_balance: number | null; // account balance of linked user, null for guests
+}
+
+export interface AdminOrderSummary {
+  total: number;
+  pending: number;
+  processing: number;
+  shipped: number;
+  delivered: number;
+  cancelled: number;
+  paid_count: number;
+  unpaid_count: number;
+  today_orders: number;
+  today_revenue: number;
+}
+
+export interface AdminOrderFilters {
+  status?: string;
+  search?: string;
+  date_from?: string;
+  date_to?: string;
+  is_paid?: boolean | "";
+  show_hidden?: boolean;
+}
+
+export interface AdminOrderUpdatePayload {
+  status?: OrderStatus;
+  is_paid?: boolean;
+  is_hidden?: boolean;
+  assigned_delivery_boy?: number | null;
+  delivery_notes?: string;
+  cash_amount?: string | number;
+  cash_received?: boolean;
+  delivery_status?: string;
+}
+
+export interface DeliveryStatusOption {
+  id: number;
+  name: string;
+  color: string;
+  background_color: string;
+  border_color: string;
+  order: number;
+}
+
+export interface CreateAdminOrderPayload {
+  user_id?: number | null;
+  guest_name?: string;
+  guest_phone?: string;
+  shipping_address: string;
+  payment_method: PaymentMethod;
+  payment_number?: string;
+  assigned_delivery_boy?: number | null;
+  delivery_notes?: string;
+  status?: OrderStatus;
+  items: { product_id: number; quantity: number }[];
+}
+
+export interface DeliveryBoy {
+  id: number;
+  name: string;
+  is_available: boolean;
+}
+
+export interface CustomerOrderStats {
+  total_orders: number;
+  delivered_count: number;
+  total_bottles: number;
+  last_order_date: string | null;
+  account_balance: number | null;
+}
+
+export type WorkingStatus = 'Active' | 'Inactive' | 'Resigned' | 'Terminated' | 'On Leave';
+
+export interface StaffProfile {
+  id: number;          // UserProfile.id
+  user_id: number;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  phone_number: string | null;
+  address: string | null;
+  is_available: boolean;
+  // Rider
+  is_rider: boolean;
+  vehicle_type: string | null;
+  vehicle_number: string | null;
+  // HR
+  employee_id: string | null;
+  cnic_number: string | null;
+  date_of_birth: string | null;
+  age: number | null;
+  date_of_joining: string | null;
+  working_status: WorkingStatus;
+  emergency_contact: string | null;
+  department: string | null;
+  designation: string | null;
+  salary: string | null;
+  remarks: string | null;
+  // Media URLs
+  profile_picture_url: string | null;
+  cnic_front_url: string | null;
+  cnic_back_url: string | null;
+  driving_license_url: string | null;
+  // Stats (riders only)
+  total_deliveries: number | null;
+  delivered_count: number | null;
+}
+
+export interface CreateStaffPayload {
+  username: string;
+  email?: string;
+  password: string;
+  first_name?: string;
+  last_name?: string;
+  phone_number?: string;
+  address?: string;
+  is_rider?: boolean;
+  vehicle_type?: string;
+  vehicle_number?: string;
+  employee_id?: string;
+  cnic_number?: string;
+  date_of_birth?: string;
+  date_of_joining?: string;
+  working_status?: WorkingStatus;
+  emergency_contact?: string;
+  department?: string;
+  designation?: string;
+  salary?: number;
+  remarks?: string;
+}
+
+export interface UpdateStaffPayload {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone_number?: string | null;
+  address?: string | null;
+  is_rider?: boolean;
+  is_available?: boolean;
+  vehicle_type?: string | null;
+  vehicle_number?: string | null;
+  employee_id?: string | null;
+  cnic_number?: string | null;
+  date_of_birth?: string | null;
+  date_of_joining?: string | null;
+  working_status?: WorkingStatus;
+  emergency_contact?: string | null;
+  department?: string | null;
+  designation?: string | null;
+  salary?: number | null;
+  remarks?: string | null;
+}
+
+// Legacy alias
+export type RiderProfile = StaffProfile;
+export type CreateRiderPayload = CreateStaffPayload;
+export type UpdateRiderPayload = UpdateStaffPayload;
 
 export interface AuthTokens {
   access: string;

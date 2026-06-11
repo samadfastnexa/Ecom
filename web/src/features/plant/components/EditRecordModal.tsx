@@ -101,7 +101,7 @@ export function EditRecordModal({
               <option value="">— None —</option>
               {customerTypes.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name}
+                  {t.name}{!t.is_active ? " (inactive)" : ""}
                 </option>
               ))}
             </select>
@@ -118,7 +118,7 @@ export function EditRecordModal({
               <option value="">— None —</option>
               {bottleTypes.map((b) => (
                 <option key={b.id} value={b.id}>
-                  {b.name}
+                  {b.name}{!b.is_active ? " (inactive)" : ""}
                 </option>
               ))}
             </select>

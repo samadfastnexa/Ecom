@@ -63,7 +63,7 @@ export function RegisterForm() {
   return (
     <AuthShell
       title="Create your account"
-      subtitle="Join AquaShop in a few seconds"
+      subtitle="Join Century Sip in a few seconds"
       maxWidth="lg"
     >
       <form onSubmit={submit} className="space-y-4">

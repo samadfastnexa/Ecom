@@ -6,11 +6,11 @@ export function Footer() {
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-2 px-4 py-8 text-center text-sm text-mist/60">
         <div className="flex items-center gap-2 text-mist">
           <Droplets size={18} className="text-wave" />
-          <span className="font-semibold">AquaShop</span>
+          <span className="font-semibold">Century Sip</span>
         </div>
         <p>Fresh deliveries, straight to your door.</p>
         <p className="text-xs text-mist/40">
-          © {new Date().getFullYear()} AquaShop — Built with Next.js & Django.
+          © {new Date().getFullYear()} Century Sip. All rights reserved.
         </p>
       </div>
     </footer>

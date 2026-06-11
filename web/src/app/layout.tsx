@@ -4,9 +4,8 @@ import { Navbar, Footer, WaveBackground } from "@/components/layout";
 import { Providers } from "@/context/providers";
 
 export const metadata: Metadata = {
-  title: "AquaShop — Fresh deliveries",
-  description:
-    "A water-themed e-commerce storefront powered by Next.js & Django.",
+  title: "Century Sip — Fresh deliveries",
+  description: "Century Sip — Fresh water deliveries, straight to your door.",
 };
 
 export default function RootLayout({
