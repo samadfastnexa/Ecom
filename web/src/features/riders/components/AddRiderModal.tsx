@@ -70,7 +70,7 @@ export function AddRiderModal({ open, onClose, onCreated }: AddRiderModalProps) 
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Add Delivery Boy" className="max-w-lg">
+    <Modal open={open} onClose={onClose} title="Add Delivery Boy" className="max-w-3xl">
       <div className="flex flex-col gap-4 max-h-[75vh] overflow-y-auto pr-1">
         {/* Account */}
         <p className="text-xs font-semibold uppercase tracking-wide text-mist/40">Account</p>

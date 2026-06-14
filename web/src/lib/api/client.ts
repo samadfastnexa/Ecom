@@ -92,6 +92,9 @@ export async function apiFetch<T = unknown>(
     const newAccess = await refreshAccessToken();
     if (newAccess) return apiFetch<T>(path, { ...options, retry: false });
     tokenStore.clear();
+    if (typeof window !== "undefined") {
+      window.location.replace("/login");
+    }
   }
 
   if (!res.ok) {

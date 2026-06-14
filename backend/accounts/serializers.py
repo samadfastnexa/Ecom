@@ -6,6 +6,10 @@ from .models import UserProfile
 
 
 class UpdateProfileSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(
+        required=False,
+        validators=[UniqueValidator(queryset=User.objects.all(), message="Username already taken.")],
+    )
     phone_number = serializers.CharField(
         source='profile.phone_number', allow_blank=True, allow_null=True, required=False
     )
@@ -15,7 +19,7 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('first_name', 'last_name', 'email', 'phone_number', 'address')
+        fields = ('username', 'first_name', 'last_name', 'email', 'phone_number', 'address')
         extra_kwargs = {
             'email': {'required': False},
             'first_name': {'required': False},
@@ -84,10 +88,14 @@ class RegisterSerializer(serializers.ModelSerializer):
             username=validated_data['username'],
             email=validated_data['email'],
             first_name=validated_data.get('first_name', ''),
-            last_name=validated_data.get('last_name', '')
+            last_name=validated_data.get('last_name', ''),
+            is_active=True,
         )
         user.set_password(validated_data['password'])
         user.save()
+        profile = user.profile
+        profile.user_type = 'customer'
+        profile.save(update_fields=['user_type'])
         return user
 
 
@@ -101,6 +109,10 @@ class StaffProfileSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(source='user.first_name', read_only=True)
     last_name = serializers.CharField(source='user.last_name', read_only=True)
     full_name = serializers.SerializerMethodField()
+    is_active = serializers.BooleanField(source='user.is_active', read_only=True)
+    last_login = serializers.DateTimeField(source='user.last_login', read_only=True)
+    date_joined = serializers.DateTimeField(source='user.date_joined', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
     age = serializers.SerializerMethodField()
     total_deliveries = serializers.SerializerMethodField()
     delivered_count = serializers.SerializerMethodField()
@@ -113,6 +125,7 @@ class StaffProfileSerializer(serializers.ModelSerializer):
         model = UserProfile
         fields = [
             'id', 'user_id', 'username', 'email', 'first_name', 'last_name', 'full_name',
+            'is_active', 'last_login', 'date_joined', 'created_by_name',
             'phone_number', 'address', 'is_available',
             # Rider-specific
             'is_rider', 'vehicle_type', 'vehicle_number',
@@ -128,6 +141,11 @@ class StaffProfileSerializer(serializers.ModelSerializer):
 
     def get_full_name(self, obj):
         return obj.user.get_full_name() or obj.user.username
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.username
+        return None
 
     def get_age(self, obj):
         return obj.age
@@ -223,9 +241,20 @@ class CreateStaffSerializer(serializers.Serializer):
 
 class UpdateStaffSerializer(serializers.Serializer):
     """PATCH updates to a staff member — user fields + all profile fields."""
+    username = serializers.CharField(required=False)
     first_name = serializers.CharField(required=False, allow_blank=True)
     last_name = serializers.CharField(required=False, allow_blank=True)
     email = serializers.EmailField(required=False, allow_blank=True)
+    is_active = serializers.BooleanField(required=False)
+
+    def validate_username(self, value):
+        if value:
+            qs = User.objects.filter(username=value)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.user.pk)
+            if qs.exists():
+                raise serializers.ValidationError("Username already taken.")
+        return value
     phone_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     address = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     # Rider
@@ -255,7 +284,7 @@ class UpdateStaffSerializer(serializers.Serializer):
         return value
 
     def update(self, profile, validated_data):
-        user_fields = ['first_name', 'last_name', 'email']
+        user_fields = ['username', 'first_name', 'last_name', 'email', 'is_active']
         user_data = {k: validated_data.pop(k) for k in user_fields if k in validated_data}
         if user_data:
             for attr, value in user_data.items():
@@ -293,13 +322,29 @@ class UserSerializer(serializers.ModelSerializer):
     )
     is_staff = serializers.BooleanField(read_only=True)
     can_manage_plant = serializers.SerializerMethodField()
+    # Staff / rider HR fields (null for customers)
+    employee_id = serializers.CharField(source='profile.employee_id', read_only=True)
+    designation = serializers.CharField(source='profile.designation', read_only=True)
+    department = serializers.CharField(source='profile.department', read_only=True)
+    emergency_contact = serializers.CharField(source='profile.emergency_contact', read_only=True)
+    cnic_number = serializers.CharField(source='profile.cnic_number', read_only=True)
+    date_of_birth = serializers.DateField(source='profile.date_of_birth', read_only=True)
+    date_of_joining = serializers.DateField(source='profile.date_of_joining', read_only=True)
+    salary = serializers.DecimalField(
+        source='profile.salary', max_digits=12, decimal_places=2, read_only=True
+    )
+    remarks = serializers.CharField(source='profile.remarks', read_only=True)
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'first_name', 'last_name',
-                  'user_type', 'phone_number', 'address', 'is_available',
-                  'vehicle_type', 'vehicle_number', 'account_balance',
-                  'is_staff', 'can_manage_plant')
+        fields = (
+            'id', 'username', 'email', 'first_name', 'last_name',
+            'user_type', 'phone_number', 'address', 'is_available',
+            'vehicle_type', 'vehicle_number', 'account_balance',
+            'is_staff', 'can_manage_plant',
+            'employee_id', 'designation', 'department', 'emergency_contact',
+            'cnic_number', 'date_of_birth', 'date_of_joining', 'salary', 'remarks',
+        )
 
     def get_can_manage_plant(self, obj):
         return (

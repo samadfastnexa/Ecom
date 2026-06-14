@@ -34,6 +34,7 @@ export function ProfileView() {
   const [saveError, setSaveError] = useState("");
 
   const [form, setForm] = useState({
+    username: "",
     first_name: "",
     last_name: "",
     email: "",
@@ -59,6 +60,7 @@ export function ProfileView() {
 
   const startEdit = () => {
     setForm({
+      username: user.username ?? "",
       first_name: user.first_name ?? "",
       last_name: user.last_name ?? "",
       email: user.email ?? "",
@@ -79,6 +81,7 @@ export function ProfileView() {
     setSaveError("");
     try {
       await authApi.updateProfile({
+        username: form.username || undefined,
         first_name: form.first_name || undefined,
         last_name: form.last_name || undefined,
         email: form.email || undefined,
@@ -135,6 +138,9 @@ export function ProfileView() {
           </span>
           <div className="relative flex-1">
             <h1 className="text-2xl font-bold text-white">{fullName}</h1>
+            {fullName !== user.username && (
+              <p className="text-sm text-white/60">@{user.username}</p>
+            )}
             <Chip className="mt-1 bg-white/20 text-white">
               <BadgeCheck size={14} />
               {roleLabel}
@@ -154,6 +160,11 @@ export function ProfileView() {
         <div className="p-6">
           {editing ? (
             <div className="flex flex-col gap-4">
+              <Input
+                label="Username"
+                value={form.username}
+                onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
+              />
               <div className="grid gap-4 sm:grid-cols-2">
                 <Input
                   label="First name"

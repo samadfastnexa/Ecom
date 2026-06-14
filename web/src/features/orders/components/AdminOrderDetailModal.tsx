@@ -246,7 +246,7 @@ export function AdminOrderDetailModal({ order, onClose, onUpdated }: AdminOrderD
       open={!!order}
       onClose={onClose}
       title={`Order #${order.id}`}
-      className="max-w-xl"
+      className="max-w-3xl"
     >
       <div className="flex flex-col gap-1 max-h-[80vh] overflow-y-auto pr-1">
         {/* Status + date */}

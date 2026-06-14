@@ -12,20 +12,19 @@ import {
   LogOut,
   Menu,
   X,
-  Factory,
-  Settings,
-  ClipboardList,
-  Bike,
-  Users,
+  LayoutDashboard,
 } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/cn";
 
-const BASE_LINKS = [
+const GUEST_LINKS = [
+  { href: "/", label: "Shop", icon: Droplets },
+];
+
+const AUTH_LINKS = [
   { href: "/", label: "Shop", icon: Droplets },
   { href: "/orders", label: "Orders", icon: Package },
-  { href: "/support", label: "Support", icon: LifeBuoy },
 ];
 
 export function Navbar() {
@@ -35,10 +34,7 @@ export function Navbar() {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
 
-  // Show the Plant link only to users who can manage the plant.
-  const LINKS = user?.can_manage_plant
-    ? [...BASE_LINKS, { href: "/plant", label: "Plant", icon: Factory }]
-    : BASE_LINKS;
+  const LINKS = user ? AUTH_LINKS : GUEST_LINKS;
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -51,6 +47,7 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-abyss/60 backdrop-blur-xl">
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+        {/* Logo */}
         <Link href="/" className="flex items-center gap-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-wave-gradient shadow-glow">
             <Droplets size={20} className="text-white" />
@@ -60,6 +57,7 @@ export function Navbar() {
           </span>
         </Link>
 
+        {/* Desktop nav links */}
         <div className="hidden items-center gap-1 md:flex">
           {LINKS.map(({ href, label, icon: Icon }) => (
             <Link
@@ -78,7 +76,9 @@ export function Navbar() {
           ))}
         </div>
 
+        {/* Right side */}
         <div className="flex items-center gap-2">
+          {/* Cart */}
           <Link
             href="/cart"
             className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-mist transition hover:bg-white/10"
@@ -101,35 +101,17 @@ export function Navbar() {
                 <User size={16} />
                 {user.first_name || user.username}
               </Link>
+
               {user.is_staff && (
-                <>
-                  <Link
-                    href="/manage/orders"
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm transition hover:bg-white/10",
-                      isActive("/manage/orders") ? "text-wave" : "text-mist/80"
-                    )}
-                  >
-                    <ClipboardList size={16} /> Orders
-                  </Link>
-                  <Link
-                    href="/manage/staff"
-                    className={cn(
-                      "flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm transition hover:bg-white/10",
-                      isActive("/manage/staff") ? "text-wave" : "text-mist/80"
-                    )}
-                  >
-                    <Users size={16} /> Staff
-                  </Link>
-                  <Link
-                    href="/settings"
-                    className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-mist/80 transition hover:bg-white/10 hover:text-wave"
-                    aria-label="Settings"
-                  >
-                    <Settings size={18} />
-                  </Link>
-                </>
+                <Link
+                  href="/manage/orders"
+                  className="flex items-center gap-1.5 rounded-xl border border-wave/40 bg-wave/10 px-3 py-2 text-sm font-medium text-wave transition hover:bg-wave/20"
+                >
+                  <LayoutDashboard size={15} />
+                  Admin
+                </Link>
               )}
+
               <button
                 onClick={handleLogout}
                 className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-mist/80 transition hover:bg-rose-500/20 hover:text-rose-300"
@@ -144,6 +126,7 @@ export function Navbar() {
             </Link>
           )}
 
+          {/* Mobile menu toggle */}
           <button
             onClick={() => setOpen((v) => !v)}
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-mist md:hidden"
@@ -154,6 +137,7 @@ export function Navbar() {
         </div>
       </nav>
 
+      {/* Mobile menu */}
       {open && (
         <div className="border-t border-white/10 px-4 py-3 md:hidden">
           <div className="flex flex-col gap-1">
@@ -171,6 +155,7 @@ export function Navbar() {
                 {label}
               </Link>
             ))}
+
             {user ? (
               <>
                 <Link
@@ -180,31 +165,17 @@ export function Navbar() {
                 >
                   <User size={16} /> {user.first_name || user.username}
                 </Link>
+
                 {user.is_staff && (
-                  <>
-                    <Link
-                      href="/manage/orders"
-                      onClick={() => setOpen(false)}
-                      className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-mist/80"
-                    >
-                      <ClipboardList size={16} /> Orders (Admin)
-                    </Link>
-                    <Link
-                      href="/manage/staff"
-                      onClick={() => setOpen(false)}
-                      className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-mist/80"
-                    >
-                      <Users size={16} /> Staff
-                    </Link>
-                    <Link
-                      href="/settings"
-                      onClick={() => setOpen(false)}
-                      className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-mist/80"
-                    >
-                      <Settings size={16} /> Settings
-                    </Link>
-                  </>
+                  <Link
+                    href="/manage/orders"
+                    onClick={() => setOpen(false)}
+                    className="flex items-center gap-2 rounded-xl bg-wave/10 px-3 py-2.5 text-sm font-medium text-wave"
+                  >
+                    <LayoutDashboard size={16} /> Admin Panel
+                  </Link>
                 )}
+
                 <button
                   onClick={() => {
                     setOpen(false);

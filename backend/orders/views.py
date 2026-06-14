@@ -12,6 +12,7 @@ from .serializers import (
 )
 from core.payment_gateway import initiate_payment
 from accounts.models import UserProfile
+from activities.service import log as activity_log
 
 class OrderListCreateView(generics.ListCreateAPIView):
     serializer_class = OrderSerializer
@@ -76,15 +77,15 @@ class DeliveryBoyOrderDetailView(generics.RetrieveUpdateAPIView):
             allowed_fields = ['delivery_notes']
             data = {k: v for k, v in request.data.items() if k in allowed_fields}
             
-            if any(field in request.data for field in ['delivery_status', 'cash_received', 'cash_amount', 'number_of_bottles']):
+            if any(field in request.data for field in ['delivery_status', 'cash_received', 'cash_amount', 'number_of_bottles', 'is_paid']):
                 return Response(
                     {'error': 'Status has been locked. You can only update notes/comments.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         else:
             # First update - allow all delivery-related fields
-            allowed_fields = ['status', 'delivery_notes', 'number_of_bottles', 
-                             'delivery_status', 'cash_received', 'cash_amount']
+            allowed_fields = ['status', 'delivery_notes', 'number_of_bottles',
+                             'delivery_status', 'cash_received', 'cash_amount', 'is_paid']
             data = {k: v for k, v in request.data.items() if k in allowed_fields}
             
             # Lock the status if delivery_status is being updated from Pending
@@ -108,7 +109,23 @@ class DeliveryBoyOrderDetailView(generics.RetrieveUpdateAPIView):
         serializer = self.get_serializer(instance, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
-        
+
+        # Activity logging for rider delivery actions
+        if not is_locked:
+            ds = data.get('delivery_status')
+            if ds:
+                _rider_actions = {
+                    'Accepted': 'Delivery Accepted',
+                    'Started': 'Delivery Started',
+                    'Delivered': 'Delivery Completed',
+                }
+                if ds in _rider_actions:
+                    activity_log(
+                        request.user, 'rider', _rider_actions[ds],
+                        target_type='order', target_id=instance.id,
+                        target_label=f'Order #{instance.id}',
+                    )
+
         return Response(serializer.data)
 
 @api_view(['GET'])
@@ -198,6 +215,12 @@ class AdminOrderListView(generics.ListCreateAPIView):
         serializer = AdminOrderCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
+        activity_log(
+            request.user, 'order', 'Order Created',
+            target_type='order', target_id=order.id,
+            target_label=f'Order #{order.id}',
+            details={'status': order.status, 'total': str(order.total_price)},
+        )
         return Response(
             AdminOrderSerializer(order, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
@@ -215,6 +238,11 @@ class AdminOrderUpdateView(generics.UpdateAPIView):
         instance = self.get_object()
         data = dict(request.data)
 
+        # Capture values before mutation for activity logging
+        old_status = instance.status
+        old_rider_id = instance.assigned_delivery_boy_id
+        old_hidden = instance.is_hidden
+
         if 'status' in data:
             new_status = data['status']
             if new_status == 'Shipped' and not instance.delivery_assigned_at:
@@ -229,6 +257,33 @@ class AdminOrderUpdateView(generics.UpdateAPIView):
         serializer = self.get_serializer(instance, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+
+        # Activity logging
+        label = f'Order #{instance.id}'
+        new_status = data.get('status')
+        if new_status and new_status != old_status:
+            activity_log(
+                request.user, 'order', f'Order {new_status}',
+                target_type='order', target_id=instance.id, target_label=label,
+                details={'from': old_status, 'to': new_status},
+            )
+        if 'assigned_delivery_boy' in data:
+            new_rider_id = data['assigned_delivery_boy']
+            if new_rider_id != old_rider_id:
+                activity_log(
+                    request.user, 'order', 'Rider Assigned',
+                    target_type='order', target_id=instance.id, target_label=label,
+                    details={'rider_id': new_rider_id},
+                )
+        if 'is_hidden' in data:
+            new_hidden = instance.is_hidden
+            if new_hidden != old_hidden:
+                activity_log(
+                    request.user, 'order',
+                    'Order Hidden' if new_hidden else 'Order Unhidden',
+                    target_type='order', target_id=instance.id, target_label=label,
+                )
+
         return Response(AdminOrderSerializer(instance, context={'request': request}).data)
 
 

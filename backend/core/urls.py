@@ -27,6 +27,7 @@ urlpatterns = [
     path('api/support/', include('support.urls')),
     path('api/localization/', include('localization.urls')),
     path('api/plant/', include('plant.urls')),
+    path('api/activities/', include('activities.urls')),
 ]
 
 if settings.DEBUG:

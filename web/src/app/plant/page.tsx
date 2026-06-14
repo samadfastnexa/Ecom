@@ -1,10 +1,5 @@
-import { PlantGuard } from "@/features/plant/components/PlantGuard";
-import { PlantManagement } from "@/features/plant/components/PlantManagement";
+import { redirect } from "next/navigation";
 
-export default function PlantPage() {
-  return (
-    <PlantGuard>
-      <PlantManagement />
-    </PlantGuard>
-  );
+export default function PlantRedirect() {
+  redirect("/manage/plant");
 }

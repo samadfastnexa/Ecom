@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { Navbar, Footer, WaveBackground } from "@/components/layout";
+import { ClientShell } from "@/components/layout/ClientShell";
 import { Providers } from "@/context/providers";
 
 export const metadata: Metadata = {
@@ -17,12 +17,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="font-sans">
         <Providers>
-          <WaveBackground />
-          <Navbar />
-          <main className="mx-auto min-h-[70vh] w-full max-w-6xl px-4 py-8">
-            {children}
-          </main>
-          <Footer />
+          <ClientShell>{children}</ClientShell>
         </Providers>
       </body>
     </html>

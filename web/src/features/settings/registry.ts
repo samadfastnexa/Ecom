@@ -1,9 +1,10 @@
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Tag, Users, GlassWater } from "lucide-react";
+import { Tag, Users, GlassWater, Smartphone } from "lucide-react";
 import { PricingSettings } from "./components/sections/PricingSettings";
 import { CustomerTypesSettings } from "./components/sections/CustomerTypesSettings";
 import { BottleTypesSettings } from "./components/sections/BottleTypesSettings";
+import { MobileProfileSettings } from "./components/sections/MobileProfileSettings";
 
 export interface SettingsSectionEntry {
   id: string;
@@ -30,5 +31,11 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
     label: "Bottle Types",
     icon: GlassWater,
     Component: BottleTypesSettings,
+  },
+  {
+    id: "mobile-profile",
+    label: "Mobile Profile",
+    icon: Smartphone,
+    Component: MobileProfileSettings,
   },
 ];

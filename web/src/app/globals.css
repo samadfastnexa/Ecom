@@ -117,6 +117,15 @@ select.input optgroup {
   color: #e0f7ff;
 }
 
+/* Nav loading progress bar */
+@keyframes nav-progress {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+.animate-nav-progress {
+  animation: nav-progress 1.3s ease-in-out infinite;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 10px;

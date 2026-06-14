@@ -291,7 +291,7 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="New Order" className="max-w-2xl">
+    <Modal open={open} onClose={onClose} title="New Order" className="max-w-4xl">
       <div className="flex flex-col gap-5 max-h-[75vh] overflow-y-auto pr-1">
 
         {/* Customer section */}

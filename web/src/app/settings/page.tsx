@@ -1,10 +1,5 @@
-import { SettingsGuard } from "@/features/settings/components/SettingsGuard";
-import { SettingsPage } from "@/features/settings/components/SettingsPage";
+import { redirect } from "next/navigation";
 
-export default function Page() {
-  return (
-    <SettingsGuard>
-      <SettingsPage />
-    </SettingsGuard>
-  );
+export default function SettingsRedirect() {
+  redirect("/manage/settings");
 }

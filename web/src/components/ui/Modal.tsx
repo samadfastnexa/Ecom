@@ -32,7 +32,7 @@ export function Modal({ open, onClose, title, children, className }: ModalProps)
       onClick={onClose}
     >
       <div
-        className={cn("glass-strong my-8 w-full max-w-lg p-6", className)}
+        className={cn("glass-strong my-8 w-full p-6", className ?? "max-w-lg")}
         onClick={(e) => e.stopPropagation()}
       >
         {title && (

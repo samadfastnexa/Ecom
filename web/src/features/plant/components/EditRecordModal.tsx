@@ -79,7 +79,7 @@ export function EditRecordModal({
   };
 
   return (
-    <Modal open onClose={onClose} title={`Edit delivery #${record.id}`}>
+    <Modal open onClose={onClose} title={`Edit delivery #${record.id}`} className="max-w-3xl">
       <div className="space-y-4">
         <Input
           label="Date"

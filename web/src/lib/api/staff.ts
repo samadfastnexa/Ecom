@@ -1,5 +1,5 @@
 import { apiFetch } from "./client";
-import type { AdminOrder, CreateStaffPayload, StaffProfile, UpdateStaffPayload } from "../types";
+import type { AdminOrder, CreateStaffPayload, MobileProfileConfig, StaffProfile, UpdateStaffPayload } from "../types";
 
 export const staffApi = {
   list(): Promise<StaffProfile[]> {
@@ -40,5 +40,20 @@ export const staffApi = {
 
   history(id: number): Promise<AdminOrder[]> {
     return apiFetch<AdminOrder[]>(`/auth/admin/staff/${id}/history/`, { auth: true });
+  },
+
+  getMobileProfileConfig(): Promise<Record<string, MobileProfileConfig>> {
+    return apiFetch<Record<string, MobileProfileConfig>>("/auth/admin/mobile-profile-config/", { auth: true });
+  },
+
+  updateMobileProfileConfig(
+    userType: "delivery_boy" | "staff",
+    fields: Record<string, { visible?: boolean; editable?: boolean }>
+  ): Promise<{ user_type: string; fields: MobileProfileConfig }> {
+    return apiFetch(`/auth/admin/mobile-profile-config/${userType}/`, {
+      method: "PATCH",
+      auth: true,
+      body: { fields },
+    });
   },
 };

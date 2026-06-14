@@ -74,7 +74,14 @@ export interface Complaint {
   subject: string;
   description: string;
   status: ComplaintStatus;
+  admin_reply?: string | null;
+  admin_reply_at?: string | null;
   created_at: string;
+}
+
+export interface AdminComplaint extends Complaint {
+  user_name: string;
+  user_email: string;
 }
 
 export interface UserProfile {
@@ -231,6 +238,7 @@ export interface RegisterPayload {
 }
 
 export interface UpdateProfilePayload {
+  username?: string;
   first_name?: string;
   last_name?: string;
   email?: string;
@@ -340,6 +348,29 @@ export interface CustomerOrderStats {
   account_balance: number | null;
 }
 
+export interface AdminCustomer {
+  id: number;
+  username: string;
+  name: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string | null;
+  address: string | null;
+  date_joined: string;
+  is_active: boolean;
+}
+
+export interface CreateCustomerPayload {
+  username: string;
+  password: string;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone_number?: string;
+  address?: string;
+}
+
 export type WorkingStatus = 'Active' | 'Inactive' | 'Resigned' | 'Terminated' | 'On Leave';
 
 export interface StaffProfile {
@@ -350,6 +381,7 @@ export interface StaffProfile {
   first_name: string;
   last_name: string;
   full_name: string;
+  is_active: boolean;
   phone_number: string | null;
   address: string | null;
   is_available: boolean;
@@ -403,9 +435,11 @@ export interface CreateStaffPayload {
 }
 
 export interface UpdateStaffPayload {
+  username?: string;
   first_name?: string;
   last_name?: string;
   email?: string;
+  is_active?: boolean;
   phone_number?: string | null;
   address?: string | null;
   is_rider?: boolean;
@@ -423,6 +457,14 @@ export interface UpdateStaffPayload {
   salary?: number | null;
   remarks?: string | null;
 }
+
+export interface MobileProfileFieldConfig {
+  visible: boolean;
+  editable: boolean;
+  label: string;
+}
+
+export type MobileProfileConfig = Record<string, MobileProfileFieldConfig>;
 
 // Legacy alias
 export type RiderProfile = StaffProfile;

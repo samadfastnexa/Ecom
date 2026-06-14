@@ -14,7 +14,7 @@ import type { RegisterPayload, UserProfile } from "@/lib/types";
 interface AuthContextValue {
   user: UserProfile | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<UserProfile | null>;
   register: (payload: RegisterPayload) => Promise<void>;
   logout: () => void;
   refreshProfile: () => Promise<void>;
@@ -26,16 +26,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshProfile = useCallback(async () => {
+  const refreshProfile = useCallback(async (): Promise<UserProfile | null> => {
     if (!tokenStore.access) {
       setUser(null);
-      return;
+      return null;
     }
     try {
-      setUser(await authApi.profile());
+      const profile = await authApi.profile();
+      setUser(profile);
+      return profile;
     } catch {
       setUser(null);
       tokenStore.clear();
+      return null;
     }
   }, []);
 
@@ -47,10 +50,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshProfile]);
 
   const login = useCallback(
-    async (username: string, password: string) => {
+    async (username: string, password: string): Promise<UserProfile | null> => {
       const tokens = await authApi.login(username, password);
       tokenStore.set(tokens.access, tokens.refresh);
-      await refreshProfile();
+      return refreshProfile();
     },
     [refreshProfile]
   );

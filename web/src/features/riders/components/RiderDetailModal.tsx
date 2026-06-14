@@ -188,7 +188,7 @@ export function RiderDetailModal({ rider, onClose, onUpdated }: RiderDetailModal
   const deliveryRate = riderTotal > 0 ? Math.round((riderDelivered / riderTotal) * 100) : 0;
 
   return (
-    <Modal open={!!rider} onClose={onClose} title="Delivery Boy" className="max-w-xl">
+    <Modal open={!!rider} onClose={onClose} title="Delivery Boy" className="max-w-3xl">
       {/* Avatar + stats header */}
       <div className="mb-4 flex items-center gap-4 rounded-xl bg-wave-gradient p-4">
         <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/20 text-xl font-bold text-white">

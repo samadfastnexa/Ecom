@@ -102,6 +102,11 @@ function StaffCard({ member, onView }: { member: StaffProfile; onView: () => voi
             <WorkingStatusDot status={member.working_status} />
             <span className="text-xs text-mist/60">{member.working_status}</span>
           </div>
+          {!member.is_active && (
+            <span className="rounded-full bg-rose-400/15 px-2 py-0.5 text-[10px] font-semibold text-rose-300">
+              Inactive
+            </span>
+          )}
           {member.is_rider && (
             <span className="flex items-center gap-1 rounded-full bg-wave/15 px-2 py-0.5 text-[10px] font-semibold text-wave">
               <Bike size={10} /> Rider

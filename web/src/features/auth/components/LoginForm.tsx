@@ -24,8 +24,12 @@ export function LoginForm() {
     setError(null);
     setLoading(true);
     try {
-      await login(username, password);
-      router.push(next);
+      const profile = await login(username, password);
+      if (next !== "/") {
+        router.push(next);
+      } else {
+        router.push(profile?.is_staff ? "/manage/orders" : "/");
+      }
     } catch {
       setError("Invalid username or password.");
     } finally {

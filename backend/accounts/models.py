@@ -4,6 +4,66 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from datetime import date
 
+# ── Mobile profile field config ──────────────────────────────────────────────
+
+PROFILE_FIELD_DEFAULTS = {
+    'delivery_boy': {
+        'first_name':        {'visible': True,  'editable': True,  'label': 'First Name'},
+        'last_name':         {'visible': True,  'editable': True,  'label': 'Last Name'},
+        'phone_number':      {'visible': True,  'editable': True,  'label': 'Phone Number'},
+        'address':           {'visible': True,  'editable': True,  'label': 'Address'},
+        'emergency_contact': {'visible': True,  'editable': True,  'label': 'Emergency Contact'},
+        'employee_id':       {'visible': True,  'editable': False, 'label': 'Employee ID'},
+        'designation':       {'visible': True,  'editable': False, 'label': 'Designation'},
+        'department':        {'visible': True,  'editable': False, 'label': 'Department'},
+        'vehicle_type':      {'visible': True,  'editable': False, 'label': 'Vehicle Type'},
+        'vehicle_number':    {'visible': True,  'editable': False, 'label': 'Vehicle Number'},
+        'cnic_number':       {'visible': False, 'editable': False, 'label': 'CNIC Number'},
+        'date_of_birth':     {'visible': False, 'editable': False, 'label': 'Date of Birth'},
+        'date_of_joining':   {'visible': False, 'editable': False, 'label': 'Date of Joining'},
+        'salary':            {'visible': False, 'editable': False, 'label': 'Salary'},
+        'remarks':           {'visible': False, 'editable': False, 'label': 'Remarks'},
+    },
+    'staff': {
+        'first_name':        {'visible': True,  'editable': True,  'label': 'First Name'},
+        'last_name':         {'visible': True,  'editable': True,  'label': 'Last Name'},
+        'phone_number':      {'visible': True,  'editable': True,  'label': 'Phone Number'},
+        'address':           {'visible': True,  'editable': True,  'label': 'Address'},
+        'emergency_contact': {'visible': True,  'editable': True,  'label': 'Emergency Contact'},
+        'employee_id':       {'visible': True,  'editable': False, 'label': 'Employee ID'},
+        'designation':       {'visible': True,  'editable': False, 'label': 'Designation'},
+        'department':        {'visible': True,  'editable': False, 'label': 'Department'},
+        'vehicle_type':      {'visible': False, 'editable': False, 'label': 'Vehicle Type'},
+        'vehicle_number':    {'visible': False, 'editable': False, 'label': 'Vehicle Number'},
+        'cnic_number':       {'visible': False, 'editable': False, 'label': 'CNIC Number'},
+        'date_of_birth':     {'visible': False, 'editable': False, 'label': 'Date of Birth'},
+        'date_of_joining':   {'visible': False, 'editable': False, 'label': 'Date of Joining'},
+        'salary':            {'visible': False, 'editable': False, 'label': 'Salary'},
+        'remarks':           {'visible': False, 'editable': False, 'label': 'Remarks'},
+    },
+}
+
+
+class MobileProfileConfig(models.Model):
+    user_type = models.CharField(max_length=20, unique=True)
+    fields_config = models.JSONField(default=dict)
+
+    def get_config(self):
+        defaults = PROFILE_FIELD_DEFAULTS.get(self.user_type, {})
+        merged = {k: dict(v) for k, v in defaults.items()}
+        for key, val in self.fields_config.items():
+            if key in merged:
+                merged[key].update(val)
+        return merged
+
+    @classmethod
+    def for_type(cls, user_type):
+        obj, _ = cls.objects.get_or_create(user_type=user_type)
+        return obj.get_config()
+
+    def __str__(self):
+        return f'MobileProfileConfig({self.user_type})'
+
 
 class UserProfile(models.Model):
     USER_TYPE_CHOICES = [
@@ -58,6 +118,11 @@ class UserProfile(models.Model):
     designation = models.CharField(max_length=100, blank=True, null=True)
     salary = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
     remarks = models.TextField(blank=True, null=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_staff',
+        help_text="Admin who created this staff account",
+    )
 
     # ── Document uploads ─────────────────────────────────────────────────────
     cnic_front = models.ImageField(upload_to='staff/docs/', blank=True, null=True)

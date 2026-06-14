@@ -83,7 +83,7 @@ export function AddStaffModal({ open, onClose, onCreated }: AddStaffModalProps) 
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Add Staff Member" className="max-w-xl">
+    <Modal open={open} onClose={onClose} title="Add Staff Member" className="max-w-3xl">
       <div className="flex flex-col gap-4 max-h-[78vh] overflow-y-auto pr-1">
 
         {/* Account */}
