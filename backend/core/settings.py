@@ -1,6 +1,16 @@
 from pathlib import Path
 import os
 
+# Load .env from the backend directory
+_ENV_PATH = Path(__file__).resolve().parent.parent / '.env'
+if _ENV_PATH.exists():
+    with open(_ENV_PATH) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _k, _v = _line.split('=', 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -91,8 +101,12 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # Database
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('DB_NAME', 'century'),
+        'USER': os.environ.get('DB_USER', 'postgres'),
+        'PASSWORD': os.environ.get('DB_PASSWORD', ''),
+        'HOST': os.environ.get('DB_HOST', 'localhost'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
     }
 }
 

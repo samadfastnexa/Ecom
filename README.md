@@ -37,7 +37,7 @@ This starts both backend (port 8001) and frontend automatically!
 **Backend:**
 - Django 6.0.1
 - Django REST Framework
-- SQLite (development)
+- PostgreSQL
 - JWT Authentication
 
 **Frontend:**
