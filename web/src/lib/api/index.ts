@@ -7,3 +7,4 @@ export { plantApi } from "./plant";
 export { ridersApi } from "./riders";
 export { staffApi } from "./staff";
 export { customersApi } from "./customers";
+export { localizationApi } from "./localization";

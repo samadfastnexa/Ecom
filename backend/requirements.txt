@@ -23,8 +23,11 @@ requests==2.32.5
 # Excel export (plant management)
 openpyxl==3.1.5
 
-# PostgreSQL driver
+# PostgreSQL driver (local dev)
 psycopg2-binary==2.9.12
+
+# MySQL driver (shared hosting / cPanel deployment, no compiler needed)
+PyMySQL==1.1.1
 
 # Additional dependencies (add as needed)
 # python-decouple==3.8  # For environment variables
