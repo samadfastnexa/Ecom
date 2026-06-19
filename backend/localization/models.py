@@ -1,5 +1,31 @@
 from django.db import models
 
+USER_TYPE_CHOICES = [
+    ('customer', 'Customer'),
+    ('delivery_boy', 'Delivery Boy / Rider'),
+    ('staff', 'Staff'),
+    ('admin', 'Admin'),
+]
+
+class LanguageAccessSetting(models.Model):
+    """Singleton: which user types are allowed to switch the app language."""
+    allowed_user_types = models.JSONField(
+        default=list,
+        help_text='List of user_type values that can toggle language (e.g. ["customer", "delivery_boy"]). Empty = no one.',
+    )
+
+    class Meta:
+        verbose_name = "Language Access Setting"
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return f"Language access: {self.allowed_user_types}"
+
+
 class TranslationCategory(models.Model):
     name = models.CharField(max_length=100, unique=True, help_text="Name of the page or section (e.g., 'Home Screen')")
     description = models.TextField(blank=True, null=True)

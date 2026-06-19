@@ -1,10 +1,11 @@
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Tag, Users, GlassWater, Smartphone } from "lucide-react";
+import { Tag, Users, GlassWater, Smartphone, Languages } from "lucide-react";
 import { PricingSettings } from "./components/sections/PricingSettings";
 import { CustomerTypesSettings } from "./components/sections/CustomerTypesSettings";
 import { BottleTypesSettings } from "./components/sections/BottleTypesSettings";
 import { MobileProfileSettings } from "./components/sections/MobileProfileSettings";
+import { LanguageSettings } from "./components/sections/LanguageSettings";
 
 export interface SettingsSectionEntry {
   id: string;
@@ -37,5 +38,11 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
     label: "Mobile Profile",
     icon: Smartphone,
     Component: MobileProfileSettings,
+  },
+  {
+    id: "language",
+    label: "Language Access",
+    icon: Languages,
+    Component: LanguageSettings,
   },
 ];
