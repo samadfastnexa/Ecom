@@ -9,3 +9,8 @@ export const STORAGE_KEYS = {
   refresh: "ecom_refresh",
   cart: "ecom_cart",
 } as const;
+
+/** Image upload limits (must match the backend in core/image_limits.py). */
+export const MAX_IMAGES = 3;
+export const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB
+export const MAX_IMAGE_SIZE_LABEL = "5 MB";

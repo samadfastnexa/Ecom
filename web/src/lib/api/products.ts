@@ -18,7 +18,8 @@ export interface ProductInput {
   price: string | number;
   is_active?: boolean;
   category?: number | null;
-  image?: File | null;
+  /** New gallery images to upload (replaces existing on update). Max 3. */
+  images?: File[];
 }
 
 function toFormData(data: ProductInput): FormData {
@@ -28,7 +29,9 @@ function toFormData(data: ProductInput): FormData {
   fd.append("price", String(data.price));
   fd.append("is_active", String(data.is_active ?? true));
   if (data.category != null) fd.append("category", String(data.category));
-  if (data.image instanceof File) fd.append("image", data.image);
+  if (data.images?.length) {
+    for (const file of data.images) fd.append("uploaded_images", file);
+  }
   return fd;
 }
 

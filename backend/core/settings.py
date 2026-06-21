@@ -15,12 +15,15 @@ if _ENV_PATH.exists():
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Quick-start development settings - unsuitable for production
-SECRET_KEY = 'django-insecure-dev-key-for-now'
+SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-dev-key-for-now')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Set DEBUG=False in the environment on the server.
+DEBUG = os.environ.get('DEBUG', 'True').strip().lower() in ('true', '1', 'yes')
 
-ALLOWED_HOSTS = ['*']
+# Comma-separated list in the environment, e.g.
+# ALLOWED_HOSTS=century.zipnixtechnologies.com
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get('ALLOWED_HOSTS', '*').split(',') if h.strip()]
 
 # Application definition
 INSTALLED_APPS = [
@@ -66,6 +69,8 @@ SIMPLE_JWT = {
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # WhiteNoise serves static files in production (must be right after SecurityMiddleware)
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -105,6 +110,10 @@ DB_ENGINE = os.environ.get('DB_ENGINE', 'postgresql')
 
 if DB_ENGINE == 'mysql':
     import pymysql
+    # Django 6.0's MySQL backend requires mysqlclient >= 2.2.1. PyMySQL impersonates
+    # MySQLdb but reports its own version (1.4.6), failing that check. Spoof the
+    # version so PyMySQL is accepted (PyMySQL is fully compatible for our use).
+    pymysql.version_info = (2, 2, 1, "final", 0)
     pymysql.install_as_MySQLdb()
     DATABASES = {
         'default': {
@@ -153,6 +162,18 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
+# Destination collectstatic writes to (served by WhiteNoise in production)
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# WhiteNoise: compressed static file serving without a separate web server
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

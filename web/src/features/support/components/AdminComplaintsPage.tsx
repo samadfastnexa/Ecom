@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import type { AdminComplaint, AdminCustomer, ComplaintStatus } from "@/lib/types";
 import { adminComplaintsApi, customersApi } from "@/lib/api";
-import { Button, Card, Input, Modal, Skeleton, useToast } from "@/components/ui";
+import { Button, Card, Input, Modal, MultiImagePicker, Skeleton, useToast } from "@/components/ui";
 import { useAsync } from "@/hooks/useAsync";
 import { formatDate } from "@/lib/format";
 import { cn } from "@/lib/cn";
@@ -43,6 +43,7 @@ function ComplaintFormModal({
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
+  const [images, setImages] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -57,6 +58,7 @@ function ComplaintFormModal({
       setCustomerId("");
       setCustomerSearch("");
     }
+    setImages([]);
     setErrors({});
   }, [complaint, open]);
 
@@ -91,7 +93,12 @@ function ComplaintFormModal({
     try {
       const saved = isEdit
         ? await adminComplaintsApi.edit(complaint.id, { subject: subject.trim(), description: description.trim() })
-        : await adminComplaintsApi.create({ user_id: customerId as number, subject: subject.trim(), description: description.trim() });
+        : await adminComplaintsApi.create({
+            user_id: customerId as number,
+            subject: subject.trim(),
+            description: description.trim(),
+            images: images.length ? images : undefined,
+          });
       notify(`Complaint ${isEdit ? "updated" : "created"}.`);
       onSaved(saved);
       onClose();
@@ -163,6 +170,16 @@ function ComplaintFormModal({
           />
           {errors.description && <p className="mt-1 text-xs text-rose-400">{errors.description}</p>}
         </div>
+
+        {/* Attachments (create mode only) */}
+        {!isEdit && (
+          <MultiImagePicker
+            label="Attach photos (optional)"
+            value={images}
+            onChange={setImages}
+            onError={(msg) => notify(msg, "error")}
+          />
+        )}
 
         <div className="flex gap-3 pt-1">
           <Button onClick={handleSave} loading={saving} fullWidth>
@@ -316,6 +333,24 @@ function ComplaintRow({
           <div className="mb-4 rounded-lg bg-white/5 p-3 text-sm leading-relaxed text-mist/80">
             {complaint.description}
           </div>
+
+          {/* Attachments */}
+          {complaint.images && complaint.images.length > 0 && (
+            <div className="mb-4 flex flex-wrap gap-2">
+              {complaint.images.map((img) => (
+                <a
+                  key={img.id}
+                  href={img.image}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="h-20 w-20 overflow-hidden rounded-lg border border-white/10"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={img.image} alt="Attachment" className="h-full w-full object-cover" />
+                </a>
+              ))}
+            </div>
+          )}
 
           {/* Existing reply */}
           {complaint.admin_reply && (

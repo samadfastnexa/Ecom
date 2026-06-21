@@ -7,6 +7,11 @@ export interface Category {
   icon: string;
 }
 
+export interface ImageRef {
+  id: number;
+  image: string;
+}
+
 export interface Product {
   id: number;
   name: string;
@@ -14,6 +19,7 @@ export interface Product {
   price: string;
   is_active: boolean;
   image: string | null;
+  images: ImageRef[];
   category_details: Category | null;
   created_at: string;
   updated_at: string;
@@ -77,6 +83,7 @@ export interface Complaint {
   admin_reply?: string | null;
   admin_reply_at?: string | null;
   created_at: string;
+  images?: ImageRef[];
 }
 
 export interface AdminComplaint extends Complaint {
@@ -268,6 +275,7 @@ export interface CreateOrderPayload {
 export interface ComplaintInput {
   subject: string;
   description: string;
+  images?: File[];
 }
 
 /* ---------- Admin order management ---------- */

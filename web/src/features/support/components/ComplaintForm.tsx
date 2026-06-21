@@ -3,12 +3,13 @@
 import { useState } from "react";
 import { Send, MessageSquare } from "lucide-react";
 import { complaintsApi } from "@/lib/api";
-import { Button, Input, Textarea, useToast } from "@/components/ui";
+import { Button, Input, Textarea, MultiImagePicker, useToast } from "@/components/ui";
 
 export function ComplaintForm({ onCreated }: { onCreated: () => void }) {
   const notify = useToast();
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
+  const [images, setImages] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -16,9 +17,14 @@ export function ComplaintForm({ onCreated }: { onCreated: () => void }) {
     if (!subject.trim() || !description.trim()) return;
     setSubmitting(true);
     try {
-      await complaintsApi.create({ subject, description });
+      await complaintsApi.create({
+        subject,
+        description,
+        images: images.length ? images : undefined,
+      });
       setSubject("");
       setDescription("");
+      setImages([]);
       notify("Your message has been sent.");
       onCreated();
     } catch (err) {
@@ -47,6 +53,12 @@ export function ComplaintForm({ onCreated }: { onCreated: () => void }) {
         rows={5}
         placeholder="Tell us what happened…"
         required
+      />
+      <MultiImagePicker
+        label="Attach photos (optional)"
+        value={images}
+        onChange={setImages}
+        onError={(msg) => notify(msg, "error")}
       />
       <Button type="submit" loading={submitting} fullWidth>
         <Send size={16} /> Send message

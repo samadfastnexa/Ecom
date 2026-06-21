@@ -9,4 +9,5 @@ export { EmptyState } from "./EmptyState";
 export { QuantityStepper } from "./QuantityStepper";
 export { PageHeader } from "./PageHeader";
 export { Modal } from "./Modal";
+export { MultiImagePicker } from "./MultiImagePicker";
 export { ToastProvider, useToast } from "./Toast";

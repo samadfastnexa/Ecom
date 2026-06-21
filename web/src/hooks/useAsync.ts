@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 interface AsyncState<T> {
   data: T | null;
   loading: boolean;
   error: string | null;
   reload: () => void;
-  setData: (data: T | null) => void;
+  setData: Dispatch<SetStateAction<T | null>>;
 }
 
 /**
