@@ -17,7 +17,7 @@ interface AuthContextValue {
   login: (username: string, password: string) => Promise<UserProfile | null>;
   register: (payload: RegisterPayload) => Promise<void>;
   logout: () => void;
-  refreshProfile: () => Promise<void>;
+  refreshProfile: () => Promise<UserProfile | null>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);

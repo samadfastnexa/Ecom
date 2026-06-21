@@ -19,3 +19,16 @@ class Complaint(models.Model):
 
     def __str__(self):
         return f"{self.subject} - {self.user.username}"
+
+
+class ComplaintImage(models.Model):
+    """Attachment image for a complaint (up to 3 per complaint, enforced in the API)."""
+    complaint = models.ForeignKey(Complaint, related_name='images', on_delete=models.CASCADE)
+    image = models.ImageField(upload_to='complaints/')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+
+    def __str__(self):
+        return f"Image for complaint #{self.complaint_id}"

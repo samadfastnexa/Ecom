@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Tag, FileText, DollarSign, ImageIcon, X } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Tag, FileText, DollarSign } from "lucide-react";
 import type { Category, Product } from "@/lib/types";
 import type { ProductInput } from "@/lib/api/products";
 import { adminProductsApi, categoriesApi } from "@/lib/api";
-import { Button, Input, Modal, useToast } from "@/components/ui";
+import { Button, Input, Modal, MultiImagePicker, useToast } from "@/components/ui";
 import { useAsync } from "@/hooks/useAsync";
 
 interface ProductFormModalProps {
@@ -18,15 +18,14 @@ interface ProductFormModalProps {
 export function ProductFormModal({ open, product, onClose, onSaved }: ProductFormModalProps) {
   const notify = useToast();
   const categories = useAsync(() => categoriesApi.list(), []);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
   const [categoryId, setCategoryId] = useState<number | "">("");
   const [isActive, setIsActive] = useState(true);
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [existingImages, setExistingImages] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -40,32 +39,25 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
       setPrice(product.price);
       setCategoryId(product.category_details?.id ?? "");
       setIsActive(product.is_active);
-      setImageFile(null);
-      setImagePreview(product.image || null);
+      setImageFiles([]);
+      // Prefer the gallery; fall back to the legacy single image.
+      const urls = product.images?.length
+        ? product.images.map((img) => img.image)
+        : product.image
+          ? [product.image]
+          : [];
+      setExistingImages(urls);
     } else {
       setName("");
       setDescription("");
       setPrice("");
       setCategoryId("");
       setIsActive(true);
-      setImageFile(null);
-      setImagePreview(null);
+      setImageFiles([]);
+      setExistingImages([]);
     }
     setErrors({});
   }, [product, open]);
-
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setImageFile(file);
-    setImagePreview(URL.createObjectURL(file));
-  };
-
-  const clearImage = () => {
-    setImageFile(null);
-    setImagePreview(null);
-    if (fileRef.current) fileRef.current.value = "";
-  };
 
   const validate = () => {
     const errs: Record<string, string> = {};
@@ -86,7 +78,8 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
         price,
         is_active: isActive,
         category: categoryId || null,
-        image: imageFile,
+        // Only send images when the user picked new ones; otherwise keep existing.
+        images: imageFiles.length ? imageFiles : undefined,
       };
       const saved = isEdit
         ? await adminProductsApi.update(product.id, payload)
@@ -185,39 +178,14 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
           </button>
         </div>
 
-        {/* Image upload */}
-        <div>
-          <label className="label">Product image (optional)</label>
-          {imagePreview ? (
-            <div className="relative w-full overflow-hidden rounded-xl border border-white/10">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={imagePreview}
-                alt="Preview"
-                className="h-40 w-full object-cover"
-              />
-              <button
-                type="button"
-                onClick={clearImage}
-                className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-abyss/80 text-mist/80 hover:text-rose-300"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          ) : (
-            <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border border-dashed border-white/20 bg-white/5 py-6 transition hover:bg-white/10">
-              <ImageIcon size={24} className="text-mist/30" />
-              <span className="text-xs text-mist/50">Click to upload image</span>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleImageChange}
-              />
-            </label>
-          )}
-        </div>
+        {/* Image upload (gallery, up to 3) */}
+        <MultiImagePicker
+          label="Product images (optional)"
+          value={imageFiles}
+          onChange={setImageFiles}
+          existing={existingImages}
+          onError={(msg) => notify(msg, "error")}
+        />
 
         <div className="flex gap-3 pt-1">
           <Button onClick={submit} loading={saving} fullWidth>

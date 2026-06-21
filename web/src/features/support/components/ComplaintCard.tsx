@@ -18,6 +18,22 @@ export function ComplaintCard({ complaint }: { complaint: Complaint }) {
         </Chip>
       </div>
       <p className="mt-2 text-sm text-mist/70">{complaint.description}</p>
+      {complaint.images && complaint.images.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {complaint.images.map((img) => (
+            <a
+              key={img.id}
+              href={img.image}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="h-16 w-16 overflow-hidden rounded-lg border border-white/10"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={img.image} alt="Attachment" className="h-full w-full object-cover" />
+            </a>
+          ))}
+        </div>
+      )}
       <p className="mt-2 text-xs text-mist/40">
         {formatDate(complaint.created_at)}
       </p>

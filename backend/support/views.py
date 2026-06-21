@@ -1,11 +1,12 @@
 from django.utils import timezone
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, serializers
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
-from .models import Complaint
+from core.image_limits import validate_image_list
+from .models import Complaint, ComplaintImage
 from .serializers import ComplaintSerializer, AdminComplaintSerializer
 
 
@@ -53,12 +54,20 @@ class AdminComplaintListCreateView(APIView):
         if not description:
             return Response({'description': 'Description is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        images = request.FILES.getlist('uploaded_images')
+        try:
+            validate_image_list(images)
+        except serializers.ValidationError as e:
+            return Response({'uploaded_images': e.detail}, status=status.HTTP_400_BAD_REQUEST)
+
         customer = get_object_or_404(User, pk=user_id)
         complaint = Complaint.objects.create(
             user=customer,
             subject=subject,
             description=description,
         )
+        for f in images:
+            ComplaintImage.objects.create(complaint=complaint, image=f)
         return Response(
             AdminComplaintSerializer(complaint).data,
             status=status.HTTP_201_CREATED,

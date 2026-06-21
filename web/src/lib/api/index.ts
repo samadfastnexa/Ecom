@@ -8,3 +8,9 @@ export { ridersApi } from "./riders";
 export { staffApi } from "./staff";
 export { customersApi } from "./customers";
 export { localizationApi } from "./localization";
+export {
+  notificationsApi,
+  type NotificationAudience,
+  type SendNotificationPayload,
+  type SendNotificationResult,
+} from "./notifications";

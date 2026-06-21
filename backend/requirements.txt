@@ -29,6 +29,9 @@ psycopg2-binary==2.9.12
 # MySQL driver (shared hosting / cPanel deployment, no compiler needed)
 PyMySQL==1.1.1
 
+# Static file serving in production (no separate web server needed)
+whitenoise==6.8.2
+
 # Additional dependencies (add as needed)
 # python-decouple==3.8  # For environment variables
 # gunicorn==21.2.0  # For production deployment
