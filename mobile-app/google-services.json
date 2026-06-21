@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1054797578232",
+    "project_id": "ecom-c08aa",
+    "storage_bucket": "ecom-c08aa.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1054797578232:android:31f826e0bc95c83409600d",
+        "android_client_info": {
+          "package_name": "com.zipnixtechnologies.century"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyABrennGbwhLzbLgerYzd3NBQ232RliLi4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
