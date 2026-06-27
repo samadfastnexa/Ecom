@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.models import User, Group, Permission
 from django.contrib.auth.admin import UserAdmin, GroupAdmin as BaseGroupAdmin
 from django.utils.html import format_html
-from .models import UserProfile
+from .models import UserProfile, NotificationHistory
 
 class UserProfileInline(admin.StackedInline):
     model = UserProfile
@@ -179,6 +179,45 @@ class UserProfileAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+
+@admin.register(NotificationHistory)
+class NotificationHistoryAdmin(admin.ModelAdmin):
+    list_display = ('title', 'recipient_type', 'sent_count', 'total_devices', 'success_rate_display', 'sent_by', 'created_at')
+    list_filter = ('recipient_type', 'created_at')
+    search_fields = ('title', 'body', 'sent_by__username')
+    readonly_fields = ('sent_count', 'total_devices', 'success_rate_display', 'sent_by', 'created_at', 'sent_at')
+    date_hierarchy = 'created_at'
+
+    fieldsets = (
+        ('Notification Content', {
+            'fields': ('title', 'body', 'image_url')
+        }),
+        ('Delivery Information', {
+            'fields': ('recipient_type', 'scheduled_for', 'sent_by', 'created_at', 'sent_at')
+        }),
+        ('Statistics', {
+            'fields': ('sent_count', 'total_devices', 'success_rate_display')
+        }),
+    )
+
+    def success_rate_display(self, obj):
+        rate = obj.success_rate
+        color = '#28a745' if rate >= 80 else '#ffc107' if rate >= 50 else '#dc3545'
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}%</span>',
+            color,
+            rate
+        )
+    success_rate_display.short_description = 'Success Rate'
+
+    def has_add_permission(self, request):
+        # Prevent manual creation - notifications should be sent via API
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        # Make read-only
+        return False
 
 # Unregister the default User and Group admins, then register our custom ones
 admin.site.unregister(User)

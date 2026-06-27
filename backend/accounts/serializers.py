@@ -2,7 +2,42 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from rest_framework.validators import UniqueValidator
-from .models import UserProfile
+from .models import UserProfile, NotificationTemplate
+
+
+class NotificationTemplateSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = NotificationTemplate
+        fields = (
+            'id', 'name', 'title', 'body', 'recipient_type',
+            'created_by_name', 'created_at', 'updated_at',
+        )
+        read_only_fields = ('id', 'created_by_name', 'created_at', 'updated_at')
+
+    def get_created_by_name(self, obj):
+        if obj.created_by:
+            return obj.created_by.get_full_name() or obj.created_by.username
+        return None
+
+    def validate_name(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('Template name is required.')
+        return value
+
+    def validate_title(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('Title is required.')
+        return value
+
+    def validate_body(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('Message is required.')
+        return value
 
 
 class UpdateProfileSerializer(serializers.ModelSerializer):

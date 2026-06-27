@@ -13,4 +13,6 @@ export {
   type NotificationAudience,
   type SendNotificationPayload,
   type SendNotificationResult,
+  type NotificationTemplate,
+  type NotificationTemplateInput,
 } from "./notifications";
