@@ -1,0 +1,49 @@
+# ─── Python / Django ───────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite3
+db.sqlite3
+backend/staticfiles/
+backend/media/
+.venv/
+venv/
+env/
+
+# ─── Node / Next.js / Expo ─────────────────────────────────
+node_modules/
+.next/
+out/
+dist/
+web-build/
+.expo/
+.expo-shared/
+*.tsbuildinfo
+
+# ─── Secrets / environment ─────────────────────────────────
+.env
+.env.local
+.env*.local
+*.jks
+*.keystore
+*.p8
+*.p12
+*.pem
+# google-services.json is intentionally tracked (safe to embed; needed by EAS).
+service-account*.json
+
+# ─── Build archives / bundles (never commit these) ─────────
+*.zip
+*.tar
+*.tar.gz
+
+# ─── Logs ──────────────────────────────────────────────────
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# ─── OS / editor cruft ─────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.orig
