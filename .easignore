@@ -1,0 +1,36 @@
+# EAS builds the mobile app from this monorepo's git root, so this file
+# controls what gets uploaded. The mobile build only needs mobile-app/,
+# so exclude everything else and all heavy/unnecessary files.
+# (When present, EAS uses this INSTEAD of .gitignore for the upload.)
+
+# Dependencies — reinstalled on the build server
+node_modules/
+**/node_modules/
+
+# Other apps in the monorepo — not needed to build the mobile app
+/backend/
+/web/
+
+# Stray build archives (these alone are ~200 MB)
+*.zip
+**/*.zip
+
+# Caches, VCS, Python cruft
+.git/
+**/.expo/
+dist/
+web-build/
+**/__pycache__/
+*.pyc
+
+# Local env & secrets — never upload these
+**/.env
+**/.env*.local
+*.jks
+*.keystore
+*.p8
+*.p12
+
+# Logs & OS cruft
+*.log
+.DS_Store

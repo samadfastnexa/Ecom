@@ -1,8 +1,28 @@
-export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8002/api";
+/* ============================================================
+ *  🔧  BACKEND TOGGLE  —  matches the mobile app's switch.
+ *  ------------------------------------------------------------
+ *    USE_LOCAL = true   →  the admin uses your LOCAL backend
+ *                          (localhost:8002 — the web runs on your PC)
+ *    USE_LOCAL = false  →  the admin uses the LIVE server
+ *                          (NEXT_PUBLIC_API_URL from the build, else live)
+ *
+ *  ⚠️ Set this back to false before building for deployment.
+ * ============================================================ */
+const USE_LOCAL = false;
 
-export const MEDIA_URL =
-  process.env.NEXT_PUBLIC_MEDIA_URL || "http://localhost:8002";
+const LOCAL_API_URL = "http://localhost:8002/api";
+const LOCAL_MEDIA_URL = "http://localhost:8002";
+const LIVE_API_URL = "https://century.zipnixtechnologies.com/api";
+const LIVE_MEDIA_URL = "https://century.zipnixtechnologies.com";
+/* ============================================================ */
+
+export const API_URL = USE_LOCAL
+  ? LOCAL_API_URL
+  : process.env.NEXT_PUBLIC_API_URL || LIVE_API_URL;
+
+export const MEDIA_URL = USE_LOCAL
+  ? LOCAL_MEDIA_URL
+  : process.env.NEXT_PUBLIC_MEDIA_URL || LIVE_MEDIA_URL;
 
 export const STORAGE_KEYS = {
   access: "ecom_access",

@@ -1,0 +1,36 @@
+# Files EAS should NOT upload in the project tarball.
+# (When this file exists, EAS uses it instead of .gitignore for uploads.)
+# The build server reinstalls dependencies, so node_modules must never be sent.
+
+# Dependencies — reinstalled on the build server from package-lock.json
+node_modules/
+
+# Expo / Metro caches and build output
+.expo/
+dist/
+web-build/
+.metro-health-check*
+
+# Native folders (managed workflow regenerates these via prebuild)
+android/
+ios/
+
+# Tests & TS build artifacts — not needed to build the app
+__tests__/
+**/*.test.ts
+**/*.test.tsx
+*.tsbuildinfo
+
+# Local env & secrets
+.env
+.env*.local
+*.jks
+*.keystore
+*.p8
+*.p12
+
+# Logs & OS cruft
+*.log
+npm-debug.*
+.DS_Store
+.git/
