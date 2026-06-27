@@ -1,41 +1,45 @@
 import Constants from 'expo-constants';
 
+/* ============================================================
+ *  🔧  BACKEND TOGGLE  —  the only switch you need
+ *  ------------------------------------------------------------
+ *    USE_LOCAL = true   →  the WHOLE app uses your LOCAL backend
+ *    USE_LOCAL = false  →  the WHOLE app uses the LIVE server
+ *
+ *  This wins over anything in .env, so flipping it here is all
+ *  you have to do (then restart Metro:  npx expo start -c).
+ * ============================================================ */
+const USE_LOCAL = false;
+
+// Used only when USE_LOCAL is true. Point at your PC on the LAN.
+// Find your IP with:  ipconfig   (IPv4 Address, e.g. 192.168.1.5)
+const LOCAL_HOST = '192.168.100.17';
+const LOCAL_PORT = '8002';
+/* ============================================================ */
+
+const LIVE_API_URL = 'https://century.zipnixtechnologies.com/api';
+
 /**
  * Resolve the base API URL.
  *
- * Priority:
- *   1. `apiUrl`   — a full URL (e.g. the live HTTPS backend). Highest priority.
- *   2. `apiHost` + `apiPort` — for local dev against a LAN backend
- *      (builds `http://host:port/api`).
- *   3. The live backend as the default, so production builds and Expo Go
- *      hit the deployed API out of the box.
- *
- * All values come from Expo config `extra` (set in app.config.js from .env).
+ *   - USE_LOCAL=true  → always http://LOCAL_HOST:LOCAL_PORT/api
+ *   - USE_LOCAL=false → an explicit API_URL from .env (used by EAS
+ *                       production builds) if present, else the live backend.
  */
-const LIVE_API_URL = 'https://century.zipnixtechnologies.com/api';
-
 const resolveApiUrl = (): string => {
-    const extra = Constants.expoConfig?.extra;
+    if (USE_LOCAL) {
+        return `http://${LOCAL_HOST}:${LOCAL_PORT}/api`;
+    }
 
-    // 1. Explicit full API URL (live backend or any custom override).
-    const fullUrl = extra?.apiUrl;
-    if (fullUrl) {
+    const fullUrl = Constants.expoConfig?.extra?.apiUrl;
+    if (fullUrl && String(fullUrl) !== 'null') {
         return String(fullUrl).replace(/\/+$/, '');
     }
-
-    // 2. Host:port for local development against a LAN backend.
-    const host = extra?.apiHost;
-    const port = extra?.apiPort;
-    if (host && port) {
-        return `http://${host}:${port}/api`;
-    }
-
-    // 3. Default: the deployed live backend.
     return LIVE_API_URL;
 };
 
 export const API_URL = resolveApiUrl();
 
 if (__DEV__) {
-    console.log('🌐 API URL:', API_URL);
+    console.log(`🌐 API URL: ${API_URL}  (${USE_LOCAL ? 'LOCAL' : 'LIVE'})`);
 }

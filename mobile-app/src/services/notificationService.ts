@@ -7,7 +7,8 @@ import { getAuthToken } from './authService';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),
@@ -61,10 +62,14 @@ export async function registerForPushNotificationsAsync() {
 
 export const sendPushTokenToBackend = async (token: string) => {
   const authToken = await getAuthToken();
-  if (!authToken) return;
+  if (!authToken) {
+    console.warn('⚠️ Push token NOT saved: no auth token in storage.');
+    return;
+  }
 
   try {
-    await fetch(`${API_URL}/auth/device/`, {
+    console.log('📤 Saving push token to backend:', `${API_URL}/auth/device/`);
+    const res = await fetch(`${API_URL}/auth/device/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -72,7 +77,13 @@ export const sendPushTokenToBackend = async (token: string) => {
       },
       body: JSON.stringify({ token }),
     });
+    const text = await res.text();
+    if (res.ok) {
+      console.log('✅ Push token saved to backend:', res.status, text);
+    } else {
+      console.warn('❌ Push token save failed:', res.status, text);
+    }
   } catch (error) {
-    console.error('Error sending push token:', error);
+    console.error('❌ Error sending push token:', error);
   }
 };

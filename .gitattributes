@@ -1,0 +1,5 @@
+# Keep shell scripts LF so they run on Git Bash even after a Windows checkout.
+*.sh text eol=lf
+# Windows scripts stay CRLF.
+*.bat text eol=crlf
+*.ps1 text eol=crlf
