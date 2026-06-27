@@ -4,6 +4,23 @@ from django.utils.deprecation import MiddlewareMixin
 
 logger = logging.getLogger('api')
 
+# Any field whose name contains one of these (case-insensitive) is masked
+# before logging, so credentials/tokens never hit the logs.
+SENSITIVE_KEY_HINTS = ('password', 'token', 'secret', 'authorization', 'access', 'refresh')
+
+
+def _mask_sensitive(value):
+    """Recursively replace values of sensitive-looking keys with a placeholder."""
+    if isinstance(value, dict):
+        return {
+            k: ('***HIDDEN***' if any(h in str(k).lower() for h in SENSITIVE_KEY_HINTS)
+                else _mask_sensitive(v))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_mask_sensitive(v) for v in value]
+    return value
+
 
 class RequestLoggingMiddleware(MiddlewareMixin):
     """
@@ -22,14 +39,9 @@ class RequestLoggingMiddleware(MiddlewareMixin):
             if request.method in ['POST', 'PUT', 'PATCH']:
                 try:
                     if request.body:
-                        body = json.loads(request.body)
-                        # Hide sensitive data
-                        if 'password' in body:
-                            body['password'] = '***HIDDEN***'
-                        if 'token' in body:
-                            body['token'] = '***HIDDEN***'
+                        body = _mask_sensitive(json.loads(request.body))
                 except:
-                    body = request.body.decode('utf-8')[:100] if request.body else None
+                    body = '<unparsed/non-JSON body>' if request.body else None
 
             # Log the request
             logger.info(f"""

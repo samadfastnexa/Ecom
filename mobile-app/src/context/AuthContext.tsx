@@ -100,7 +100,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.log('✅ Login successful, saving token...');
       setToken(accessToken);
       await AsyncStorage.setItem('auth_token', accessToken);
-      
+      if (data.refresh) await AsyncStorage.setItem('refresh_token', data.refresh);
+
       // Fetch user profile
       console.log('👤 Fetching user profile...');
       const userProfile = await authService.getProfile(accessToken);
@@ -187,6 +188,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const accessToken = data.access;
       setToken(accessToken);
       await AsyncStorage.setItem('auth_token', accessToken);
+      if (data.refresh) await AsyncStorage.setItem('refresh_token', data.refresh);
       const userProfile = await authService.getProfile(accessToken);
       setUser(userProfile);
       await AsyncStorage.setItem('auth_user', JSON.stringify(userProfile));
@@ -208,8 +210,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const logout = async () => {
     setIsLoading(true);
     try {
-      await AsyncStorage.removeItem('auth_token');
-      await AsyncStorage.removeItem('auth_user');
+      await AsyncStorage.multiRemove(['auth_token', 'refresh_token', 'auth_user']);
       setToken(null);
       setUser(null);
     } catch (e) {
