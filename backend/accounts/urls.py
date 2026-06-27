@@ -8,8 +8,9 @@ from .views import (
     AdminStaffListCreateView, AdminStaffDetailView,
     AdminStaffDocumentView, AdminStaffHistoryView,
     AdminCustomerListView, AdminCustomerCreateView, AdminCustomerDetailView,
-    AdminResetPasswordView, AdminSendNotificationView, GoogleAuthView,
-    MobileProfileConfigView, AdminMobileProfileConfigView,
+    AdminResetPasswordView, AdminSendNotificationView, AdminNotificationHistoryView,
+    NotificationTemplateListCreateView, NotificationTemplateDetailView,
+    GoogleAuthView, MobileProfileConfigView, AdminMobileProfileConfigView,
 )
 
 urlpatterns = [
@@ -34,6 +35,9 @@ urlpatterns = [
 
     path('admin/reset-password/<int:user_id>/', AdminResetPasswordView.as_view(), name='admin-reset-password'),
     path('admin/notifications/send/', AdminSendNotificationView.as_view(), name='admin-send-notification'),
+    path('admin/notifications/history/', AdminNotificationHistoryView.as_view(), name='admin-notification-history'),
+    path('admin/notifications/templates/', NotificationTemplateListCreateView.as_view(), name='admin-notification-templates'),
+    path('admin/notifications/templates/<int:pk>/', NotificationTemplateDetailView.as_view(), name='admin-notification-template-detail'),
 
     # Mobile profile field config
     path('mobile-profile-config/', MobileProfileConfigView.as_view(), name='mobile-profile-config'),

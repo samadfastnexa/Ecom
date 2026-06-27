@@ -152,3 +152,63 @@ def save_user_profile(sender, instance, **kwargs):
         instance.profile.save()
     else:
         UserProfile.objects.get_or_create(user=instance)
+
+
+class NotificationHistory(models.Model):
+    """Store history of sent push notifications for admin tracking."""
+    RECIPIENT_TYPE_CHOICES = [
+        ('all', 'Everyone'),
+        ('customers', 'Customers Only'),
+        ('riders', 'Delivery Boys Only'),
+        ('admins', 'Admins Only'),
+        ('test', 'Test Mode'),
+    ]
+
+    title = models.CharField(max_length=200)
+    body = models.TextField()
+    recipient_type = models.CharField(max_length=20, choices=RECIPIENT_TYPE_CHOICES, default='all')
+    image_url = models.URLField(blank=True, null=True)
+    sent_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='sent_notifications')
+    sent_count = models.IntegerField(default=0, help_text="Number of devices that received the notification")
+    total_devices = models.IntegerField(default=0, help_text="Total number of target devices")
+    scheduled_for = models.DateTimeField(blank=True, null=True, help_text="When notification is scheduled to be sent")
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(blank=True, null=True, help_text="When notification was actually sent")
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name_plural = 'Notification Histories'
+
+    def __str__(self):
+        return f"{self.title} - {self.recipient_type} ({self.created_at.strftime('%Y-%m-%d')})"
+
+    @property
+    def success_rate(self):
+        """Calculate percentage of successful sends."""
+        if self.total_devices == 0:
+            return 0
+        return round((self.sent_count / self.total_devices) * 100, 2)
+
+
+class NotificationTemplate(models.Model):
+    """Reusable push-notification template an admin can save and re-send."""
+    RECIPIENT_TYPE_CHOICES = NotificationHistory.RECIPIENT_TYPE_CHOICES
+
+    name = models.CharField(max_length=120, help_text="Short label for this template")
+    title = models.CharField(max_length=200)
+    body = models.TextField()
+    recipient_type = models.CharField(
+        max_length=20, choices=RECIPIENT_TYPE_CHOICES, default='all'
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='notification_templates',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return self.name

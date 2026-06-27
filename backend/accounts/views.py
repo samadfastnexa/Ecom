@@ -10,8 +10,12 @@ from .serializers import (
     RegisterSerializer, UserSerializer,
     UpdateProfileSerializer, ChangePasswordSerializer,
     StaffProfileSerializer, CreateStaffSerializer, UpdateStaffSerializer,
+    NotificationTemplateSerializer,
 )
-from .models import UserProfile, MobileProfileConfig, PROFILE_FIELD_DEFAULTS
+from .models import (
+    UserProfile, MobileProfileConfig, PROFILE_FIELD_DEFAULTS,
+    NotificationTemplate,
+)
 from activities.service import log as activity_log
 
 
@@ -434,19 +438,25 @@ class AdminSendNotificationView(APIView):
     """Send push notifications to users. Staff only.
 
     POST body:
-      title         – notification title (required)
-      body          – notification message (required)
-      recipient_type – 'all' | 'customers' | 'riders' (default: 'all')
-      user_ids      – list of user IDs (when recipient_type is 'specific', optional)
+      title          – notification title (required)
+      body           – notification message (required)
+      recipient_type – 'all' | 'customers' | 'riders' | 'admins' | 'test' (default: 'all')
+      image_url      – optional image URL for rich notifications
+      scheduled_for  – optional ISO8601 datetime for scheduling (not yet implemented)
+      user_ids       – list of user IDs (when recipient_type is 'specific', optional)
     """
     permission_classes = [IsStaff]
 
     def post(self, request):
         from core.notifications import send_push_notification
+        from accounts.models import NotificationHistory
+        from django.utils import timezone
 
         title = (request.data.get('title') or '').strip()
         body = (request.data.get('body') or '').strip()
         recipient_type = request.data.get('recipient_type', 'all')
+        image_url = (request.data.get('image_url') or '').strip() or None
+        scheduled_for = request.data.get('scheduled_for')
         user_ids = request.data.get('user_ids', [])
 
         if not title:
@@ -454,30 +464,163 @@ class AdminSendNotificationView(APIView):
         if not body:
             return Response({'body': 'Message body is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Test mode: send only to the requesting user
+        if recipient_type == 'test':
+            profile = request.user.profile
+            if profile.expo_push_token:
+                result = send_push_notification(
+                    profile.expo_push_token,
+                    title,
+                    body,
+                    data={'type': 'admin_test', 'image': image_url} if image_url else {'type': 'admin_test'}
+                )
+                sent = 1 if result else 0
+                total = 1
+            else:
+                sent = 0
+                total = 0
+                
+            # Log test notification
+            NotificationHistory.objects.create(
+                title=title,
+                body=body,
+                recipient_type='test',
+                image_url=image_url,
+                sent_by=request.user,
+                sent_count=sent,
+                total_devices=total,
+                sent_at=timezone.now(),
+            )
+            
+            return Response({
+                'sent': sent,
+                'total_tokens': total,
+                'message': 'Test notification sent' if sent else 'No push token registered for your account'
+            })
+
+        # Normal sending logic
         qs = UserProfile.objects.exclude(expo_push_token__isnull=True).exclude(expo_push_token='')
 
         if recipient_type == 'customers':
             qs = qs.filter(user_type='customer')
         elif recipient_type == 'riders':
             qs = qs.filter(user_type='delivery_boy')
+        elif recipient_type == 'admins':
+            qs = qs.filter(
+                Q(user__is_staff=True)
+                | Q(user__is_superuser=True)
+                | Q(user_type__in=['admin', 'staff'])
+            )
         elif recipient_type == 'specific' and user_ids:
             qs = qs.filter(user__id__in=user_ids)
 
         tokens = list(qs.values_list('expo_push_token', flat=True))
         sent = 0
+        
+        # Prepare notification data
+        notification_data = {'type': 'admin_broadcast'}
+        if image_url:
+            notification_data['image'] = image_url
+
         for token in tokens:
-            result = send_push_notification(token, title, body, data={'type': 'admin_broadcast'})
+            result = send_push_notification(token, title, body, data=notification_data)
             if result:
                 sent += 1
 
+        # Save to history
+        notification_history = NotificationHistory.objects.create(
+            title=title,
+            body=body,
+            recipient_type=recipient_type,
+            image_url=image_url,
+            sent_by=request.user,
+            sent_count=sent,
+            total_devices=len(tokens),
+            scheduled_for=scheduled_for,
+            sent_at=timezone.now(),
+        )
+
         activity_log(
             request.user, 'user', 'Push Notification Sent',
-            target_type='broadcast', target_id=None,
+            target_type='broadcast', target_id=notification_history.id,
             target_label=f'{recipient_type} ({sent} sent)',
             details={'title': title, 'recipient_type': recipient_type, 'sent': sent},
         )
 
         return Response({'sent': sent, 'total_tokens': len(tokens)})
+
+
+class AdminNotificationHistoryView(APIView):
+    """Get notification history with statistics. Staff only."""
+    permission_classes = [IsStaff]
+
+    def get(self, request):
+        from accounts.models import NotificationHistory
+
+        # Get query parameters for filtering
+        recipient_type = request.query_params.get('recipient_type')
+        limit = int(request.query_params.get('limit', 50))
+
+        qs = NotificationHistory.objects.select_related('sent_by').all()
+
+        if recipient_type and recipient_type != 'all':
+            qs = qs.filter(recipient_type=recipient_type)
+
+        # Limit results
+        qs = qs[:limit]
+
+        data = []
+        for notification in qs:
+            data.append({
+                'id': notification.id,
+                'title': notification.title,
+                'body': notification.body,
+                'recipient_type': notification.recipient_type,
+                'image_url': notification.image_url,
+                'sent_count': notification.sent_count,
+                'total_devices': notification.total_devices,
+                'success_rate': notification.success_rate,
+                'scheduled_for': notification.scheduled_for.isoformat() if notification.scheduled_for else None,
+                'created_at': notification.created_at.isoformat(),
+                'sent_at': notification.sent_at.isoformat() if notification.sent_at else None,
+                'sent_by': notification.sent_by.username if notification.sent_by else None,
+            })
+
+        return Response(data)
+
+
+# ── Notification templates (CRUD) ────────────────────────────────────────────
+
+class NotificationTemplateListCreateView(generics.ListCreateAPIView):
+    """List all saved notification templates / create a new one. Staff only."""
+    permission_classes = [IsStaff]
+    serializer_class = NotificationTemplateSerializer
+    queryset = NotificationTemplate.objects.select_related('created_by').all()
+
+    def perform_create(self, serializer):
+        template = serializer.save(created_by=self.request.user)
+        activity_log(
+            self.request.user, 'user', 'Notification Template Created',
+            target_type='notification_template', target_id=template.id,
+            target_label=template.name,
+        )
+
+
+class NotificationTemplateDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve / update / delete a single notification template. Staff only."""
+    permission_classes = [IsStaff]
+    serializer_class = NotificationTemplateSerializer
+    queryset = NotificationTemplate.objects.select_related('created_by').all()
+
+    def perform_destroy(self, instance):
+        label = instance.name
+        tid = instance.id
+        instance.delete()
+        activity_log(
+            self.request.user, 'user', 'Notification Template Deleted',
+            target_type='notification_template', target_id=tid,
+            target_label=label,
+        )
 
 
 # ── Mobile profile field config ──────────────────────────────────────────────
