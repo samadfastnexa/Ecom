@@ -18,10 +18,85 @@ const fetchWithTimeout = async (url: string, options: RequestInit, timeout = 300
   }
 };
 
-// Helper function to get auth token from AsyncStorage
+// ── Token storage keys ───────────────────────────────────────────────────────
+const ACCESS_KEY = 'auth_token';
+const REFRESH_KEY = 'refresh_token';
+
+/** Decode a base64url string (JWT parts) without relying on atob being present. */
+const decodeBase64Url = (input: string): string => {
+  let s = input.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  if (typeof atob === 'function') {
+    try { return atob(s); } catch { /* fall through to manual decode */ }
+  }
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let output = '';
+  let buffer = 0, bits = 0;
+  for (const ch of s) {
+    if (ch === '=') break;
+    const idx = chars.indexOf(ch);
+    if (idx === -1) continue;
+    buffer = (buffer << 6) | idx;
+    bits += 6;
+    if (bits >= 8) { bits -= 8; output += String.fromCharCode((buffer >> bits) & 0xff); }
+  }
+  return output;
+};
+
+/** True if the JWT is missing/expired (with a small clock-skew buffer). */
+const isAccessExpired = (token: string, skewSeconds = 60): boolean => {
+  try {
+    const payload = JSON.parse(decodeBase64Url(token.split('.')[1]));
+    if (!payload.exp) return false;
+    return Date.now() / 1000 >= payload.exp - skewSeconds;
+  } catch {
+    return true; // unparseable → force a refresh
+  }
+};
+
+/**
+ * Exchange the stored refresh token for a new access token (and a rotated
+ * refresh token). On failure the session is cleared. Returns the new access
+ * token, or null if the user must log in again.
+ */
+export const refreshAccessToken = async (): Promise<string | null> => {
+  const refresh = await AsyncStorage.getItem(REFRESH_KEY);
+  if (!refresh) return null;
+  try {
+    const res = await fetch(`${API_URL}/auth/token/refresh/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh }),
+    });
+    if (!res.ok) {
+      // Refresh token expired/blacklisted → end the session.
+      await AsyncStorage.multiRemove([ACCESS_KEY, REFRESH_KEY]);
+      return null;
+    }
+    const data = await res.json();
+    await AsyncStorage.setItem(ACCESS_KEY, data.access);
+    // Rotation returns a new refresh token — persist it so the 90-day window slides.
+    if (data.refresh) await AsyncStorage.setItem(REFRESH_KEY, data.refresh);
+    return data.access;
+  } catch (error) {
+    console.error('Token refresh failed:', error);
+    return null;
+  }
+};
+
+/**
+ * Get a valid access token, transparently refreshing it if it has expired.
+ * Used by every authenticated request, so users stay logged in as long as the
+ * (sliding) refresh token is alive — no manual re-login for active users.
+ */
 export const getAuthToken = async (): Promise<string | null> => {
   try {
-    return await AsyncStorage.getItem('auth_token');
+    const access = await AsyncStorage.getItem(ACCESS_KEY);
+    if (!access) return null;
+    if (isAccessExpired(access)) {
+      return await refreshAccessToken();
+    }
+    return access;
   } catch (error) {
     console.error('Error getting auth token:', error);
     return null;
@@ -94,7 +169,9 @@ export const authService = {
     }
   },
 
-  async updateProfile(token: string, userData: any) {
+  async updateProfile(_token: string, userData: any) {
+    // Always use a freshly-refreshed token so long sessions don't 401.
+    const token = (await getAuthToken()) || _token;
     const response = await fetch(`${API_URL}/auth/profile/`, {
       method: 'PATCH',
       headers: {
@@ -122,7 +199,8 @@ export const authService = {
     return data;
   },
 
-  async changePassword(token: string, oldPassword: string, newPassword: string) {
+  async changePassword(_token: string, oldPassword: string, newPassword: string) {
+    const token = (await getAuthToken()) || _token;
     const response = await fetchWithTimeout(`${API_URL}/auth/change-password/`, {
       method: 'POST',
       headers: {

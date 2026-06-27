@@ -14,16 +14,28 @@ if _ENV_PATH.exists():
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Quick-start development settings - unsuitable for production
-SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-dev-key-for-now')
-
 # SECURITY WARNING: don't run with debug turned on in production!
 # Set DEBUG=False in the environment on the server.
 DEBUG = os.environ.get('DEBUG', 'True').strip().lower() in ('true', '1', 'yes')
 
+# SECRET_KEY must come from the environment in production. The insecure fallback
+# is used only for local development (DEBUG=True) — never in production, where a
+# known key would let anyone forge JWT/session tokens.
+SECRET_KEY = os.environ.get('SECRET_KEY')
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = 'django-insecure-dev-key-for-now'
+    else:
+        raise RuntimeError('SECRET_KEY environment variable must be set when DEBUG=False.')
+
 # Comma-separated list in the environment, e.g.
 # ALLOWED_HOSTS=century.zipnixtechnologies.com
-ALLOWED_HOSTS = [h.strip() for h in os.environ.get('ALLOWED_HOSTS', '*').split(',') if h.strip()]
+# In production (DEBUG=False) it must be set explicitly — no wildcard fallback.
+ALLOWED_HOSTS = [
+    h.strip()
+    for h in os.environ.get('ALLOWED_HOSTS', '*' if DEBUG else '').split(',')
+    if h.strip()
+]
 
 # Application definition
 INSTALLED_APPS = [
@@ -39,6 +51,7 @@ INSTALLED_APPS = [
     # Local apps
     'products',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'accounts',
     'orders',
     'support',
@@ -51,6 +64,12 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    # Fail-safe default: anonymous users can read, but any write requires auth.
+    # Views needing stricter access set permission_classes explicitly (IsStaff,
+    # etc.); public-write endpoints (register/login) set AllowAny explicitly.
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticatedOrReadOnly',
+    ],
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle'
@@ -63,8 +82,16 @@ REST_FRAMEWORK = {
 
 from datetime import timedelta
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=30),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=30),
+    # Short-lived access token: limits the damage window if one is stolen.
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    # Long, *sliding* refresh token. With rotation enabled, every refresh issues
+    # a fresh 90-day refresh token, so an active user effectively never gets
+    # logged out (Facebook/Instagram-style); only ~90 days of inactivity ends it.
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=90),
+    'ROTATE_REFRESH_TOKENS': True,
+    # Old refresh tokens are blacklisted after rotation, so a leaked one can't be
+    # reused once the client has refreshed. (Requires the token_blacklist app.)
+    'BLACKLIST_AFTER_ROTATION': True,
 }
 
 MIDDLEWARE = [
@@ -82,7 +109,35 @@ MIDDLEWARE = [
     'core.middleware.RequestLoggingMiddleware',
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS: allow any origin only in local dev. In production, restrict to the known
+# web front-ends (override via the CORS_ALLOWED_ORIGINS env var, comma-separated).
+# Note: CORS is a browser protection — the mobile app is unaffected either way.
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = [
+        o.strip()
+        for o in os.environ.get(
+            'CORS_ALLOWED_ORIGINS',
+            'https://admin.zipnixtechnologies.com,https://century.zipnixtechnologies.com',
+        ).split(',')
+        if o.strip()
+    ]
+
+# Production security hardening (only applied when DEBUG is off).
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    # Trust the proxy's forwarded-proto header (LiteSpeed/Passenger terminate TLS).
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    # Opt-in via env — leave off by default to avoid redirect loops if the proxy
+    # doesn't forward the scheme. Set SECURE_SSL_REDIRECT=True once verified.
+    SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'False').strip().lower() in ('true', '1', 'yes')
 
 ROOT_URLCONF = 'core.urls'
 

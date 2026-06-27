@@ -52,7 +52,9 @@ async function refreshAccessToken(): Promise<string | null> {
     });
     if (!res.ok) return null;
     const data = await res.json();
-    tokenStore.set(data.access);
+    // Rotation issues a new refresh token each time — persist it so the next
+    // refresh doesn't use a now-blacklisted one (which would force a re-login).
+    tokenStore.set(data.access, data.refresh);
     return data.access as string;
   } catch {
     return null;
