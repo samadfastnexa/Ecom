@@ -14,7 +14,14 @@ class Category(models.Model):
     def save(self, *args, **kwargs):
         if not self.slug:
             from django.utils.text import slugify
-            self.slug = slugify(self.name)
+            base = slugify(self.name) or "category"
+            slug = base
+            n = 2
+            # Guarantee a unique slug even if two names slugify to the same value.
+            while Category.objects.exclude(pk=self.pk).filter(slug=slug).exists():
+                slug = f"{base}-{n}"
+                n += 1
+            self.slug = slug
         super().save(*args, **kwargs)
 
 class Product(models.Model):

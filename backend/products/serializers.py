@@ -6,6 +6,20 @@ class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = '__all__'
+        # Slug is derived from the name automatically; clients never set it.
+        read_only_fields = ['slug']
+
+    def validate_name(self, value):
+        name = value.strip()
+        if not name:
+            raise serializers.ValidationError("Name cannot be blank.")
+        # Reject duplicates case-insensitively (excluding self when editing).
+        qs = Category.objects.filter(name__iexact=name)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("A category with this name already exists.")
+        return name
 
 
 class ProductImageSerializer(serializers.ModelSerializer):
