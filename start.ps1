@@ -21,19 +21,19 @@ if (-Not (Test-Path "mobile-app\node_modules")) {
     Set-Location $rootDir
 }
 
-Write-Host "📦 Starting Django Backend on port 8001..." -ForegroundColor Cyan
+Write-Host "📦 Starting Django Backend on port 8002..." -ForegroundColor Cyan
 Write-Host "📱 Starting Expo Frontend..." -ForegroundColor Cyan
 Write-Host ""
 Write-Host "✅ Servers are starting in new windows!" -ForegroundColor Green
 Write-Host ""
-Write-Host "Backend:  http://localhost:8001/admin" -ForegroundColor White
+Write-Host "Backend:  http://localhost:8002/admin" -ForegroundColor White
 Write-Host "Frontend: Check Expo DevTools window" -ForegroundColor White
 Write-Host ""
 Write-Host "To stop: Close the terminal windows" -ForegroundColor Yellow
 Write-Host ""
 
 # Start backend in new window
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$rootDir\backend'; .\venv\Scripts\Activate.ps1; python manage.py runserver 0.0.0.0:8001"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$rootDir\backend'; .\venv\Scripts\Activate.ps1; python manage.py runserver 0.0.0.0:8002"
 
 # Wait a bit for backend to start
 Start-Sleep -Seconds 2

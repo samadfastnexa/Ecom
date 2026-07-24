@@ -25,7 +25,7 @@ if ($LASTEXITCODE -ne 0) {
     npm install -g concurrently
 }
 
-Write-Host "📦 Starting Django Backend on port 8001..." -ForegroundColor Cyan
+Write-Host "📦 Starting Django Backend on port 8002..." -ForegroundColor Cyan
 Write-Host "📱 Starting Expo Frontend..." -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Press Ctrl+C to stop both servers" -ForegroundColor Yellow
@@ -33,5 +33,5 @@ Write-Host ""
 
 # Run both servers concurrently in same terminal
 npx concurrently -n "BACKEND,FRONTEND" -c "blue,magenta" `
-    "cd backend && .\venv\Scripts\Activate.ps1 && python manage.py runserver 0.0.0.0:8001" `
+    "cd backend && .\venv\Scripts\Activate.ps1 && python manage.py runserver 0.0.0.0:8002" `
     "cd mobile-app && npm start"

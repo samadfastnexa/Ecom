@@ -23,8 +23,8 @@ if not exist "mobile-app\node_modules" (
     cd ..
 )
 
-echo [INFO] Starting Django Backend on port 8001...
-start "Django Backend" cmd /k "cd backend && venv\Scripts\activate && python manage.py runserver 0.0.0.0:8001"
+echo [INFO] Starting Django Backend on port 8002...
+start "Django Backend" cmd /k "cd backend && venv\Scripts\activate && python manage.py runserver 0.0.0.0:8002"
 
 REM Wait for backend to start
 timeout /t 3 /nobreak >nul
@@ -37,7 +37,7 @@ echo ========================================
 echo   Both servers are starting!
 echo ========================================
 echo.
-echo Backend:  http://localhost:8001
+echo Backend:  http://localhost:8002
 echo Frontend: Check Expo DevTools
 echo.
 echo Close the terminal windows to stop servers
