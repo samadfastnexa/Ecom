@@ -264,6 +264,172 @@ const pr = StyleSheet.create({
   iconBtn: { padding: 6 },
 });
 
+// ─── Category management ────────────────────────────────────────────────────────
+
+function CategoryRow({ category, onChanged }: { category: AdminCategory; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(category.name);
+  const [icon, setIcon] = useState(category.icon || '');
+  const [saving, setSaving] = useState(false);
+
+  const startEdit = () => {
+    setName(category.name);
+    setIcon(category.icon || '');
+    setEditing(true);
+  };
+
+  const save = async () => {
+    if (!name.trim()) { Alert.alert('Name required'); return; }
+    setSaving(true);
+    try {
+      await adminService.updateCategory(category.id, { name: name.trim(), icon: icon.trim() });
+      setEditing(false);
+      onChanged();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to update category.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = () => {
+    Alert.alert(
+      `Delete "${category.name}"?`,
+      'Products in this category will remain but become uncategorised.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete', style: 'destructive', onPress: async () => {
+            try { await adminService.deleteCategory(category.id); onChanged(); }
+            catch (e: any) { Alert.alert('Error', e.message || 'Failed to delete.'); }
+          },
+        },
+      ],
+    );
+  };
+
+  if (editing) {
+    return (
+      <View style={cm.editRow}>
+        <TextInput style={[cm.input, { flex: 1 }]} value={name} onChangeText={setName} placeholder="Name" placeholderTextColor="#bbb" autoFocus />
+        <TextInput style={[cm.input, { width: 84 }]} value={icon} onChangeText={setIcon} placeholder="icon" placeholderTextColor="#bbb" />
+        <TouchableOpacity onPress={save} disabled={saving} style={cm.iconBtn}>
+          {saving ? <ActivityIndicator size="small" color="#34C759" /> : <Ionicons name="checkmark" size={20} color="#34C759" />}
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setEditing(false)} disabled={saving} style={cm.iconBtn}>
+          <Ionicons name="close" size={20} color="#999" />
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return (
+    <View style={cm.row}>
+      <View style={{ flex: 1 }}>
+        <Text style={cm.name}>{category.name}</Text>
+        {!!category.icon && <Text style={cm.sub}>icon: {category.icon}</Text>}
+      </View>
+      <TouchableOpacity onPress={startEdit} style={cm.iconBtn}>
+        <Ionicons name="create-outline" size={18} color="#007AFF" />
+      </TouchableOpacity>
+      <TouchableOpacity onPress={remove} style={cm.iconBtn}>
+        <Ionicons name="trash-outline" size={17} color="#FF3B30" />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+interface CategoryModalProps {
+  visible: boolean;
+  categories: AdminCategory[];
+  onClose: () => void;
+  onChanged: () => void;
+}
+
+function CategoryManagerModal({ visible, categories, onClose, onChanged }: CategoryModalProps) {
+  const [newName, setNewName] = useState('');
+  const [newIcon, setNewIcon] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const add = async () => {
+    if (!newName.trim()) { Alert.alert('Name required'); return; }
+    setAdding(true);
+    try {
+      await adminService.createCategory({ name: newName.trim(), icon: newIcon.trim() || undefined });
+      setNewName('');
+      setNewIcon('');
+      onChanged();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to create category.');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={fm.container}>
+        <View style={fm.header}>
+          <Text style={fm.title}>Manage Categories</Text>
+          <TouchableOpacity onPress={onClose} style={fm.closeBtn}>
+            <Ionicons name="close" size={22} color="#555" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={cm.container} keyboardShouldPersistTaps="handled">
+          {/* Add new category */}
+          <View style={cm.addCard}>
+            <Text style={cm.addTitle}>Add category</Text>
+            <View style={cm.addRow}>
+              <TextInput style={[cm.input, { flex: 1 }]} value={newName} onChangeText={setNewName} placeholder="e.g. Water Bottles" placeholderTextColor="#bbb" />
+              <TextInput style={[cm.input, { width: 84 }]} value={newIcon} onChangeText={setNewIcon} placeholder="icon" placeholderTextColor="#bbb" />
+              <TouchableOpacity style={[cm.addBtn, adding && { opacity: 0.5 }]} onPress={add} disabled={adding}>
+                {adding ? <ActivityIndicator size="small" color="white" /> : <Ionicons name="add" size={20} color="white" />}
+              </TouchableOpacity>
+            </View>
+            <Text style={cm.hint}>Icon (optional) is an Expo Vector Icons name.</Text>
+          </View>
+
+          {/* Existing categories */}
+          <View style={cm.listCard}>
+            {categories.length === 0 ? (
+              <View style={cm.empty}>
+                <Ionicons name="pricetags-outline" size={32} color="#ddd" />
+                <Text style={cm.emptyText}>No categories yet — add your first above.</Text>
+              </View>
+            ) : (
+              categories.map((c) => <CategoryRow key={c.id} category={c} onChanged={onChanged} />)
+            )}
+          </View>
+
+          <Text style={cm.footNote}>
+            Deleting a category keeps its products — they simply become uncategorised.
+          </Text>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+const cm = StyleSheet.create({
+  container: { padding: 16, paddingBottom: 40 },
+  addCard: { backgroundColor: 'white', borderRadius: 12, padding: 12, marginBottom: 16 },
+  addTitle: { fontSize: 12, fontWeight: '700', color: '#888', textTransform: 'uppercase', marginBottom: 8 },
+  addRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  input: { borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: '#333', backgroundColor: 'white' },
+  addBtn: { backgroundColor: '#007AFF', width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  hint: { fontSize: 11, color: '#aaa', marginTop: 8 },
+  listCard: { backgroundColor: 'white', borderRadius: 12, overflow: 'hidden' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
+  editRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f5f5f5', backgroundColor: '#007AFF08' },
+  name: { fontSize: 14, fontWeight: '600', color: '#1a1a1a' },
+  sub: { fontSize: 11, color: '#aaa', marginTop: 1 },
+  iconBtn: { padding: 6 },
+  empty: { alignItems: 'center', padding: 32, gap: 8 },
+  emptyText: { color: '#bbb', fontSize: 14 },
+  footNote: { fontSize: 11, color: '#aaa', marginTop: 12, textAlign: 'center' },
+});
+
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export const AdminShopScreen: React.FC = () => {
@@ -275,6 +441,7 @@ export const AdminShopScreen: React.FC = () => {
   const [filterActive, setFilterActive] = useState<'all' | 'active' | 'inactive'>('all');
   const [modalVisible, setModalVisible] = useState(false);
   const [editProduct, setEditProduct] = useState<AdminProduct | null>(null);
+  const [categoryModalVisible, setCategoryModalVisible] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -325,7 +492,10 @@ export const AdminShopScreen: React.FC = () => {
           <Text style={[styles.statVal, { color: '#FF9500' }]}>{total - activeCount}</Text>
           <Text style={styles.statLabel}>Inactive</Text>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={openCreate}>
+        <TouchableOpacity style={styles.catBtn} onPress={() => setCategoryModalVisible(true)}>
+          <Ionicons name="pricetags-outline" size={18} color="#007AFF" />
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.addBtn, { marginLeft: 8 }]} onPress={openCreate}>
           <Ionicons name="add" size={20} color="white" />
         </TouchableOpacity>
       </View>
@@ -388,13 +558,21 @@ export const AdminShopScreen: React.FC = () => {
         </ScrollView>
       )}
 
-      {/* Modal */}
+      {/* Product create / edit modal */}
       <ProductFormModal
         visible={modalVisible}
         product={editProduct}
         categories={categories}
         onClose={() => setModalVisible(false)}
         onSaved={load}
+      />
+
+      {/* Category management modal */}
+      <CategoryManagerModal
+        visible={categoryModalVisible}
+        categories={categories}
+        onClose={() => setCategoryModalVisible(false)}
+        onChanged={load}
       />
     </View>
   );
@@ -407,6 +585,7 @@ const styles = StyleSheet.create({
   statVal: { fontSize: 18, fontWeight: '800', color: '#1a1a1a' },
   statLabel: { fontSize: 10, color: '#aaa', marginTop: 1 },
   addBtn: { marginLeft: 'auto', backgroundColor: '#007AFF', width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  catBtn: { marginLeft: 'auto', backgroundColor: '#007AFF15', width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   filterRow: { padding: 12, gap: 8, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#eee' },
   searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f5f5f5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
   searchInput: { flex: 1, fontSize: 13, color: '#333' },

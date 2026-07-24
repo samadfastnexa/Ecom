@@ -8,6 +8,7 @@ import {
   Package,
   CheckCircle2,
   EyeOff,
+  FolderTree,
 } from "lucide-react";
 import type { Category, Product } from "@/lib/types";
 import { adminProductsApi, categoriesApi } from "@/lib/api";
@@ -16,6 +17,7 @@ import { useAsync } from "@/hooks/useAsync";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { AdminProductRow } from "./AdminProductRow";
 import { ProductFormModal } from "./ProductFormModal";
+import { CategoryManagerModal } from "./CategoryManagerModal";
 
 // ─── Summary cards ────────────────────────────────────────────────────────────
 
@@ -52,6 +54,7 @@ export function AdminShopPage() {
   const [filterActive, setFilterActive] = useState<"all" | "active" | "inactive">("all");
   const [formOpen, setFormOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
+  const [catManagerOpen, setCatManagerOpen] = useState(false);
 
   const debouncedSearch = useDebouncedValue(search, 350);
 
@@ -93,6 +96,13 @@ export function AdminShopPage() {
     setFormOpen(true);
   };
 
+  // A category change can add/remove filter options and (on delete) uncategorise
+  // products, so refresh both lists.
+  const handleCategoriesChanged = useCallback(() => {
+    categories.reload();
+    products.reload();
+  }, [categories, products]);
+
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
@@ -102,9 +112,14 @@ export function AdminShopPage() {
           title="Shop Management"
           subtitle="Add and manage products visible in the store"
         />
-        <Button onClick={openCreate}>
-          <Plus size={16} /> Add Product
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={() => setCatManagerOpen(true)}>
+            <FolderTree size={16} /> Categories
+          </Button>
+          <Button onClick={openCreate}>
+            <Plus size={16} /> Add Product
+          </Button>
+        </div>
       </div>
 
       {/* Summary stats */}
@@ -204,12 +219,19 @@ export function AdminShopPage() {
         </div>
       )}
 
-      {/* Create / Edit Modal */}
+      {/* Create / Edit Product Modal */}
       <ProductFormModal
         open={formOpen}
         product={editProduct}
         onClose={() => setFormOpen(false)}
         onSaved={handleSaved}
+      />
+
+      {/* Category management Modal */}
+      <CategoryManagerModal
+        open={catManagerOpen}
+        onClose={() => setCatManagerOpen(false)}
+        onChanged={handleCategoriesChanged}
       />
     </div>
   );

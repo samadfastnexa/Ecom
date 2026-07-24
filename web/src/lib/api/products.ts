@@ -96,3 +96,34 @@ export const categoriesApi = {
     );
   },
 };
+
+export interface CategoryInput {
+  name: string;
+  /** Expo Vector Icons name (consumed by the mobile app). */
+  icon?: string;
+}
+
+export const adminCategoriesApi = {
+  create(data: CategoryInput): Promise<Category> {
+    return apiFetch<Category>("/categories/", {
+      method: "POST",
+      auth: true,
+      body: data,
+    });
+  },
+
+  update(id: number, data: Partial<CategoryInput>): Promise<Category> {
+    return apiFetch<Category>(`/categories/${id}/`, {
+      method: "PATCH",
+      auth: true,
+      body: data,
+    });
+  },
+
+  delete(id: number): Promise<void> {
+    return apiFetch<void>(`/categories/${id}/`, {
+      method: "DELETE",
+      auth: true,
+    });
+  },
+};

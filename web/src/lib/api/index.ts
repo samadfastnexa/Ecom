@@ -1,5 +1,5 @@
 export { apiFetch, ApiError, tokenStore, unwrapList } from "./client";
-export { productsApi, adminProductsApi, categoriesApi, type ProductQuery, type ProductInput } from "./products";
+export { productsApi, adminProductsApi, categoriesApi, adminCategoriesApi, type ProductQuery, type ProductInput, type CategoryInput } from "./products";
 export { ordersApi } from "./orders";
 export { authApi } from "./auth";
 export { complaintsApi, adminComplaintsApi } from "./support";

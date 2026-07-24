@@ -103,8 +103,20 @@ export async function apiFetch<T = unknown>(
     let detail: string;
     try {
       const data = await res.json();
-      detail =
-        typeof data === "string" ? data : data.detail || JSON.stringify(data);
+      if (typeof data === "string") {
+        detail = data;
+      } else if (data.detail) {
+        detail = data.detail;
+      } else {
+        // DRF field errors look like { field: ["message", …] } — surface the
+        // first human-readable message rather than dumping raw JSON.
+        const first = Object.values(data)[0];
+        detail = Array.isArray(first)
+          ? String(first[0])
+          : typeof first === "string"
+            ? first
+            : JSON.stringify(data);
+      }
     } catch {
       detail = `${res.status} ${res.statusText}`;
     }

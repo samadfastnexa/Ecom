@@ -13,9 +13,10 @@ class IsStaffOrReadOnly(permissions.BasePermission):
         return bool(request.user and request.user.is_authenticated and request.user.is_staff)
 
 
-class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Category.objects.all()
+class CategoryViewSet(viewsets.ModelViewSet):
+    queryset = Category.objects.all().order_by('name')
     serializer_class = CategorySerializer
+    permission_classes = [IsStaffOrReadOnly]
 
 
 class ProductViewSet(viewsets.ModelViewSet):

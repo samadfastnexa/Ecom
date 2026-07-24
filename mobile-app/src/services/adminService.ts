@@ -170,9 +170,31 @@ export interface AdminProduct {
 export interface AdminCategory {
   id: number;
   name: string;
+  slug?: string;
+  /** Expo Vector Icons name (optional). */
+  icon?: string;
 }
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
+
+/** Turn an error response into a human-readable message, unwrapping DRF's
+ *  `{ field: ["message", …] }` / `{ detail: "…" }` shapes when present. */
+async function errorMessage(res: Response, fallback: string): Promise<string> {
+  let text = '';
+  try { text = await res.text(); } catch { /* body already consumed / empty */ }
+  if (!text) return fallback;
+  try {
+    const data = JSON.parse(text);
+    if (typeof data === 'string') return data;
+    if (data.detail) return data.detail;
+    const first = Object.values(data)[0];
+    if (Array.isArray(first)) return String(first[0]);
+    if (typeof first === 'string') return first;
+  } catch {
+    // Response body wasn't JSON — fall through to the raw text.
+  }
+  return text;
+}
 
 async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await getAuthToken();
@@ -185,8 +207,7 @@ async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T
     },
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `Request failed: ${res.status}`);
+    throw new Error(await errorMessage(res, `Request failed: ${res.status}`));
   }
   if (res.status === 204) return undefined as unknown as T;
   return res.json();
@@ -492,8 +513,8 @@ export const adminService = {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
-      }).then((res) => {
-        if (!res.ok) throw new Error(`Failed to create product: ${res.status}`);
+      }).then(async (res) => {
+        if (!res.ok) throw new Error(await errorMessage(res, `Failed to create product: ${res.status}`));
         return res.json();
       }),
     );
@@ -505,8 +526,8 @@ export const adminService = {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
-      }).then((res) => {
-        if (!res.ok) throw new Error(`Failed to update product: ${res.status}`);
+      }).then(async (res) => {
+        if (!res.ok) throw new Error(await errorMessage(res, `Failed to update product: ${res.status}`));
         return res.json();
       }),
     );
@@ -518,5 +539,23 @@ export const adminService = {
 
   getCategories(): Promise<AdminCategory[]> {
     return adminFetch('/categories/');
+  },
+
+  createCategory(data: { name: string; icon?: string }): Promise<AdminCategory> {
+    return adminFetch('/categories/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  updateCategory(id: number, data: { name?: string; icon?: string }): Promise<AdminCategory> {
+    return adminFetch(`/categories/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  deleteCategory(id: number): Promise<void> {
+    return adminFetch(`/categories/${id}/`, { method: 'DELETE' });
   },
 };
