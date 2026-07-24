@@ -1,5 +1,8 @@
 # Dependency Management Guide
 
+> This is a curated overview, not an exhaustive lockfile. The **authoritative** lists are
+> `backend/requirements.txt` and `mobile-app/package.json` (+ `web/package.json`).
+
 ## Backend Dependencies
 
 ### Installation
@@ -22,7 +25,13 @@ pip install -r requirements.txt
 
 #### Additional
 - **django-cors-headers 4.6.0** - CORS support for API
+- **django-filter 25.2** - Queryset filtering for DRF
 - **Pillow 12.1.0** - Image processing
+- **openpyxl 3.1.5** - Excel export (plant ledger)
+- **requests 2.32.5** - Outbound HTTP (e.g. Expo push)
+- **whitenoise 6.8.2** - Static file serving
+- **psycopg2-binary 2.9.12** - PostgreSQL driver
+- **PyMySQL 1.1.1** - MySQL driver
 
 ### Updating Backend Dependencies
 

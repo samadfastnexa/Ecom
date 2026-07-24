@@ -1,108 +1,80 @@
-# E-commerce App
+# Century Sip — E-commerce Monorepo
 
-A full-stack e-commerce application with Django backend and React Native Expo frontend.
+A full-stack e-commerce + water-delivery platform:
+
+- **`backend/`** — Django + Django REST Framework API (runs on **port 8002**)
+- **`web/`** — Next.js admin panel & storefront (runs on **port 3000**)
+- **`mobile-app/`** — React Native / Expo app (Expo SDK 54)
+
+> **Port note:** the backend runs on **8002**. Port 8001 is intentionally avoided. The
+> `start.ps1` / `start.bat` / `start-same-terminal.ps1` convenience scripts launch it on
+> the correct port.
+
+---
 
 ## 🚀 Quick Start
-
-### Start Both Servers (One Command)
-
-**PowerShell:**
-```powershell
-.\start.ps1
-```
-
-**Command Prompt:**
-```cmd
-start.bat
-```
-
-This starts both backend (port 8001) and frontend automatically!
-
----
-
-## 📋 Features
-
-- 🛍️ Product catalog with categories
-- 🛒 Shopping cart
-- 📦 Order management
-- 💬 Customer support/complaints
-- 🌍 Multi-language support
-- 🔐 JWT authentication
-- 📱 Mobile-first design
-
----
-
-## 🛠️ Tech Stack
-
-**Backend:**
-- Django 6.0.1
-- Django REST Framework
-- PostgreSQL
-- JWT Authentication
-
-**Frontend:**
-- React Native
-- Expo SDK 54
-- TypeScript
-- React Navigation
-
----
-
-## 📖 Documentation
-
-- **[QUICKSTART.md](QUICKSTART.md)** - Complete setup and usage guide
-- **[DEPENDENCIES.md](DEPENDENCIES.md)** - Dependency management
-- **[NETWORK_CONFIG.md](mobile-app/NETWORK_CONFIG.md)** - Network setup for devices
-
----
-
-## 🔧 Manual Setup
 
 ### Backend
 ```bash
 cd backend
 python -m venv venv
-.\venv\Scripts\activate
+.\venv\Scripts\activate          # Windows (Mac/Linux: source venv/bin/activate)
 pip install -r requirements.txt
 python manage.py migrate
 python manage.py createsuperuser
-python manage.py runserver 0.0.0.0:8001
+python manage.py runserver 0.0.0.0:8002
 ```
 
-### Frontend
+### Web (Next.js)
+```bash
+cd web
+npm install
+npm run dev                       # http://localhost:3000
+```
+
+### Mobile (Expo)
 ```bash
 cd mobile-app
 npm install
-npm run update-ip  # Update IP for your network
-npm start
+npm start                         # scan the QR code with Expo Go
 ```
+
+For local device testing, point the app at your LAN backend via the `USE_LOCAL` toggle —
+see **[docs/network-config.md](docs/network-config.md)**.
 
 ---
 
-## 📱 Testing
+## 📖 Documentation
 
-**Android Emulator:**
-```bash
-npm run android
-```
-
-**iOS Simulator:**
-```bash
-npm run ios
-```
-
-**Physical Device:**
-1. Install Expo Go app
-2. Run `npm run update-ip` in mobile-app folder
-3. Scan QR code from `npm start`
+| Doc | What |
+|-----|------|
+| [docs/quickstart.md](docs/quickstart.md) | Setup and day-to-day commands |
+| [docs/dependencies.md](docs/dependencies.md) | Dependency overview (authoritative source: `requirements.txt` / `package.json`) |
+| [docs/network-config.md](docs/network-config.md) | Pointing the mobile app at a local vs. live backend |
+| [docs/notifications.md](docs/notifications.md) | Push-notification system (models, endpoints, web vs. mobile) |
+| [docs/api.md](docs/api.md) | Auth API reference |
+| [docs/delivery-user-fix.md](docs/delivery-user-fix.md) | Historical: delivery-user login fix |
+| [backend/README.md](backend/README.md) · [web/README.md](web/README.md) · [mobile-app/README.md](mobile-app/README.md) | Per-package notes |
 
 ---
 
-## 🌐 Network Configuration
+## 📋 Features
 
-The app automatically detects your network:
-- **Emulators**: Work automatically
-- **Physical devices**: Run `npm run update-ip` when switching networks
+- 🛍️ Product catalog with categories (full CRUD in web + mobile admin)
+- 🛒 Cart & order management, delivery assignment
+- 🚚 Plant / bottle-delivery ledger with Excel export & analytics
+- 🔔 Push notifications (templates, audiences, history)
+- 💬 Customer support / complaints
+- 👥 Staff & customer management
+- 🔐 JWT authentication (sliding refresh)
+
+---
+
+## 🛠️ Tech Stack
+
+**Backend:** Django 6.0.1 · Django REST Framework · SimpleJWT · SQLite/Postgres
+**Web:** Next.js · TypeScript · Tailwind
+**Mobile:** React Native · Expo SDK 54 · TypeScript · React Navigation
 
 ---
 
@@ -110,75 +82,41 @@ The app automatically detects your network:
 
 ```
 ecom-app/
-├── backend/              # Django backend
-│   ├── accounts/         # User authentication
-│   ├── products/         # Product management
-│   ├── orders/           # Order processing
-│   ├── support/          # Customer support
-│   └── requirements.txt  # Python dependencies
-├── mobile-app/           # React Native frontend
-│   ├── src/
-│   │   ├── screens/      # App screens
-│   │   ├── components/   # Reusable components
-│   │   ├── services/     # API services
-│   │   └── navigation/   # Navigation setup
-│   └── package.json      # Node dependencies
-├── start.ps1             # PowerShell startup script
-├── start.bat             # Batch startup script
-└── README.md             # This file
+├── backend/              # Django API (port 8002)
+│   ├── accounts/         # auth, users, staff, notifications
+│   ├── products/         # products & categories
+│   ├── orders/           # order processing & delivery
+│   ├── support/          # complaints
+│   ├── plant/            # bottle-delivery ledger
+│   ├── localization/     # multi-language
+│   ├── activities/       # audit / activity logs
+│   ├── core/             # settings, urls, shared helpers
+│   └── requirements.txt
+├── web/                  # Next.js admin & storefront (port 3000)
+│   └── src/
+├── mobile-app/           # React Native / Expo app
+│   └── src/
+├── docs/                 # project documentation
+└── README.md
 ```
 
 ---
 
-## 🔑 Default Admin Credentials
+## 🔑 Admin
 
-After running `createsuperuser`, access admin panel at:
-- **URL**: http://localhost:8001/admin
-- **Username**: (your created username)
-- **Password**: (your created password)
+After `createsuperuser`, the Django admin is at **http://localhost:8002/admin**.
 
 ---
 
 ## 🐛 Troubleshooting
 
-### Port Already in Use
+**Port already in use**
 ```powershell
-netstat -ano | findstr :8001
+netstat -ano | findstr :8002
 taskkill /PID <PID> /F
 ```
 
-### Cannot Connect to Backend
-1. Check `.env` file: `API_PORT=8001`
-2. Restart Expo: `npm start`
-3. Verify backend is running: http://localhost:8001/admin
+**Mobile can't reach the backend** — see [docs/network-config.md](docs/network-config.md)
+(check the `USE_LOCAL` toggle, same Wi-Fi, and `runserver 0.0.0.0:8002`).
 
-### Network Issues
-```bash
-cd mobile-app
-npm run update-ip
-npm start
-```
-
-See **[QUICKSTART.md](QUICKSTART.md)** for detailed troubleshooting.
-
----
-
-## 📝 License
-
-This project is for educational purposes.
-
----
-
-## 👥 Contributing
-
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
----
-
-## 📞 Support
-
-For issues and questions, create an issue in the repository.
+More detail in [docs/quickstart.md](docs/quickstart.md).

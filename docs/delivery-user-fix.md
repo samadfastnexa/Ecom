@@ -1,5 +1,11 @@
 # Delivery User Login Fix - Summary
 
+> **Status: historical record.** This fix is still present and load-bearing in the code
+> (the `user_type` field, delivery endpoints, and `create_delivery_user.py` all still
+> exist). Since it was written, a fourth user type — **`staff`** — was added, so
+> `USER_TYPE_CHOICES` is now `customer / delivery_boy / staff / admin`, alongside a larger
+> staff/HR management feature set.
+
 ## Problem
 Delivery users were unable to log in because the backend and frontend weren't properly handling the `user_type` field that distinguishes between customers, delivery boys, and admins.
 
@@ -84,7 +90,7 @@ You can edit the script to create users with different credentials.
 
 ### 3. Assign Orders to Delivery Users (Admin Panel)
 
-1. Go to Django admin: `http://localhost:8000/admin/`
+1. Go to Django admin: `http://localhost:8002/admin/`
 2. Login with superuser credentials
 3. Navigate to Orders section
 4. Edit an order and assign it to a delivery boy using the "assigned_delivery_boy" field
@@ -102,11 +108,13 @@ As a delivery user:
 
 ## API Endpoints for Delivery Users
 
-- `GET /orders/delivery/orders/` - List assigned orders
-- `GET /orders/delivery/orders/{id}/` - Get order details
-- `PATCH /orders/delivery/orders/{id}/` - Update order status
-- `GET /orders/delivery/stats/` - Get delivery statistics
-- `POST /orders/delivery/availability/` - Toggle availability
+(All under the `/api/` prefix.)
+
+- `GET /api/orders/delivery/orders/` - List assigned orders
+- `GET /api/orders/delivery/orders/{id}/` - Get order details
+- `PATCH /api/orders/delivery/orders/{id}/` - Update order status
+- `GET /api/orders/delivery/stats/` - Get delivery statistics
+- `POST /api/orders/delivery/availability/` - Toggle availability
 
 ## Next Steps (Optional Enhancements)
 
@@ -129,7 +137,7 @@ After making these changes, restart both backend and frontend:
 ```bash
 # Backend (Django)
 cd backend
-python manage.py runserver
+python manage.py runserver 0.0.0.0:8002
 
 # Frontend (React Native)
 cd mobile-app
