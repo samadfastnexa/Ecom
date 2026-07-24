@@ -35,7 +35,7 @@ def main():
         has_address = any(not arg.startswith('-') for arg in sys.argv[2:])
         if not has_address:
             host = os.environ.get('BACKEND_HOST', '0.0.0.0')
-            port = os.environ.get('BACKEND_PORT', '8001')
+            port = os.environ.get('BACKEND_PORT', '8002')
             sys.argv.append(f'{host}:{port}')
 
     try:
