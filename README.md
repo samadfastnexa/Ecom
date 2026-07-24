@@ -6,10 +6,9 @@ A full-stack e-commerce + water-delivery platform:
 - **`web/`** — Next.js admin panel & storefront (runs on **port 3000**)
 - **`mobile-app/`** — React Native / Expo app (Expo SDK 54)
 
-> **Port note:** the backend runs on **8002**. Port 8001 is intentionally avoided.
-> ⚠️ The `start.ps1` / `start.bat` / `start-same-terminal.ps1` scripts still launch the
-> backend on `0.0.0.0:8001` and should be updated to `8002` — until then, prefer the
-> manual backend command below.
+> **Port note:** the backend runs on **8002**. Port 8001 is intentionally avoided. The
+> `start.ps1` / `start.bat` / `start-same-terminal.ps1` convenience scripts launch it on
+> the correct port.
 
 ---
 

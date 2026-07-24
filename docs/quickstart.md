@@ -1,11 +1,7 @@
 # Quick Start Guide
 
 > The backend runs on **port 8002** (8001 is intentionally avoided). The web app runs on
-> **port 3000**.
->
-> ⚠️ The `start.ps1` / `start.bat` / `start-same-terminal.ps1` scripts currently launch
-> the backend on `0.0.0.0:8001`. Until they're updated to `8002`, prefer the manual
-> backend command below.
+> **port 3000**. The `start.*` convenience scripts launch the backend on the correct port.
 
 ## Starting the Application
 
@@ -29,7 +25,7 @@ npm start
 ```
 
 The convenience scripts (`.\start.ps1`, `start.bat`, `.\start-same-terminal.ps1`) start
-the backend + mobile app together, but note the port caveat above.
+the backend + mobile app together on the correct ports.
 
 ---
 
