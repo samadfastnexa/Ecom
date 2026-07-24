@@ -2,7 +2,7 @@
 
 ## Authentication Endpoints
 
-Base URL: `http://<your-ip>:8000/api/auth/`
+Base URL: `http://<your-ip>:8002/api/auth/`
 
 ### 1. Register User
 - **URL**: `/register/`
@@ -73,14 +73,18 @@ Base URL: `http://<your-ip>:8000/api/auth/`
 - **Method**: `GET`
 - **Headers**: `Authorization: Bearer <access_token>`
 - **Description**: Retrieves current user's profile information.
-- **Response (200 OK)**:
+- **Response (200 OK)**: the serializer returns the full profile (~24 fields). Beyond the
+  core identity fields it also includes `user_type`, `phone_number`, `address`,
+  `is_available`, `account_balance`, `is_staff`, `can_manage_plant`, and staff/HR fields.
+  See `UserSerializer` in `backend/accounts/serializers.py` for the authoritative list.
   ```json
   {
     "id": 1,
     "username": "johndoe",
     "email": "john@example.com",
     "first_name": "John",
-    "last_name": "Doe"
+    "last_name": "Doe",
+    "user_type": "customer"
   }
   ```
 
