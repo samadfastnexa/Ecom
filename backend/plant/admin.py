@@ -30,6 +30,21 @@ class DeliveryRecordAdmin(admin.ModelAdmin):
         if not obj.pk and not obj.created_by:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
+        # Keep the customer ledger in step with edits made here, not just
+        # through the API.
+        from ledger.service import sync_delivery_record
+        sync_delivery_record(obj, actor=request.user)
+
+    def delete_model(self, request, obj):
+        from ledger.service import void_delivery_record
+        void_delivery_record(obj, actor=request.user)  # unwind before the row goes
+        super().delete_model(request, obj)
+
+    def delete_queryset(self, request, queryset):
+        from ledger.service import void_delivery_record
+        for obj in queryset:
+            void_delivery_record(obj, actor=request.user)
+        super().delete_queryset(request, queryset)
 
 
 @admin.register(PlantSettings)

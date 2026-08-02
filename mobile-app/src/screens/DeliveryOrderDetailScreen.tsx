@@ -50,7 +50,36 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
       .finally(() => setLoadingStatuses(false));
   }, []);
 
-  const handleSubmit = async () => {
+  const isDelivering = !isStatusLocked && deliveryStatus === 'Delivered';
+
+  /**
+   * The status locks after the first submission, so confirm before writing it.
+   * Notes-only edits are reversible and skip the prompt.
+   */
+  const confirmSubmit = () => {
+    if (isStatusLocked) {
+      submitUpdate();
+      return;
+    }
+
+    const paymentLine =
+      paymentMode === 'cash'   ? `\nCash collected: PKR ${parseFloat(amount) || 0}`
+      : paymentMode === 'online' ? `\nPaid online: PKR ${parseFloat(amount) || 0}`
+      : '\nNo payment collected';
+
+    Alert.alert(
+      isDelivering ? 'Confirm Delivery' : 'Confirm Update',
+      isDelivering
+        ? `Do you want to deliver this order?\n\nOrder #${order.id} will be marked as Delivered.${paymentLine}\n\nThis can't be changed afterwards.`
+        : `Mark order #${order.id} as "${deliveryStatus}"?${paymentLine}\n\nThis can't be changed afterwards.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: isDelivering ? 'Yes, Deliver' : 'Confirm', onPress: submitUpdate },
+      ],
+    );
+  };
+
+  const submitUpdate = async () => {
     setLoading(true);
     try {
       let updateData: any;
@@ -67,9 +96,13 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
         };
       }
       await updateOrderStatus(order.id, order.status, updateData);
-      Alert.alert('Success', isStatusLocked ? 'Notes updated' : 'Order updated', [
-        { text: 'OK', onPress: () => navigation.goBack() },
-      ]);
+      Alert.alert(
+        'Success',
+        isStatusLocked ? 'Notes updated'
+          : isDelivering ? 'Order marked as delivered'
+          : 'Order updated',
+        [{ text: 'OK', onPress: () => navigation.goBack() }],
+      );
     } catch (error: any) {
       Alert.alert('Error', error?.message || 'Failed to update order');
       setLoading(false);
@@ -230,12 +263,19 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
         </View>
 
         <TouchableOpacity
-          style={[styles.submitButton, loading && styles.submitButtonDisabled]}
-          onPress={handleSubmit}
+          style={[
+            styles.submitButton,
+            isDelivering && styles.deliverButton,
+            loading && styles.submitButtonDisabled,
+          ]}
+          onPress={confirmSubmit}
           disabled={loading}
         >
+          {isDelivering && !loading && (
+            <Ionicons name="checkmark-circle" size={19} color="#fff" />
+          )}
           <Text style={styles.submitButtonText}>
-            {loading ? 'Updating…' : isStatusLocked ? 'Update Notes' : 'Submit Update'}
+            {loading ? 'Updating…' : isStatusLocked ? 'Update Notes' : isDelivering ? 'Delivered' : 'Submit Update'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -322,7 +362,12 @@ const styles = StyleSheet.create({
   warningTitle: { fontSize: 13, fontWeight: 'bold', color: '#856404', marginBottom: 2 },
   warningText: { fontSize: 12, color: '#856404', lineHeight: 17 },
 
-  submitButton: { backgroundColor: '#007AFF', paddingVertical: 16, borderRadius: 10, alignItems: 'center', marginTop: 4 },
+  submitButton: {
+    backgroundColor: '#007AFF', paddingVertical: 16, borderRadius: 10,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, marginTop: 4,
+  },
+  deliverButton: { backgroundColor: '#2ecc71' },
   submitButtonDisabled: { backgroundColor: '#a0c4ff' },
   submitButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
 });

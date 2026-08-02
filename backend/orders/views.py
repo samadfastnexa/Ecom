@@ -10,7 +10,6 @@ from .serializers import (
     OrderSerializer, DeliveryStatusSerializer,
     AdminOrderSerializer, AdminOrderUpdateSerializer, AdminOrderCreateSerializer,
 )
-from core.payment_gateway import initiate_payment
 from accounts.models import UserProfile
 from activities.service import log as activity_log
 
@@ -68,47 +67,66 @@ class DeliveryBoyOrderDetailView(generics.RetrieveUpdateAPIView):
     
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
-        
+
         # Check if delivery status has been locked (already updated once)
         is_locked = instance.delivery_status_updated_at is not None
-        
+
+        # `status`, `is_paid` and `delivery_status_updated_at` are read-only on
+        # OrderSerializer, so DRF silently drops them from validated_data. These
+        # are server-derived rather than client input, so they get written
+        # straight to the model after the serializer has saved the rest.
+        derived = {}
+
         if is_locked:
             # Only allow updating delivery_notes after first update
             allowed_fields = ['delivery_notes']
             data = {k: v for k, v in request.data.items() if k in allowed_fields}
-            
+
             if any(field in request.data for field in ['delivery_status', 'cash_received', 'cash_amount', 'number_of_bottles', 'is_paid']):
                 return Response(
                     {'error': 'Status has been locked. You can only update notes/comments.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         else:
-            # First update - allow all delivery-related fields
-            allowed_fields = ['status', 'delivery_notes', 'number_of_bottles',
-                             'delivery_status', 'cash_received', 'cash_amount', 'is_paid']
+            # First update - allow all delivery-related fields. Note `status` is
+            # deliberately absent: it is derived from delivery_status below so a
+            # rider can't push an order straight to e.g. Cancelled.
+            allowed_fields = ['delivery_notes', 'number_of_bottles',
+                             'delivery_status', 'cash_received', 'cash_amount']
             data = {k: v for k, v in request.data.items() if k in allowed_fields}
-            
-            # Lock the status if delivery_status is being updated from Pending
-            if 'delivery_status' in data and data['delivery_status'] != 'Pending' and not instance.delivery_status_updated_at:
-                data['delivery_status_updated_at'] = timezone.now()
-            
-            # Update delivery timestamps based on status changes
-            if 'status' in data:
-                if data['status'] == 'Shipped' and not instance.delivery_assigned_at:
-                    data['delivery_assigned_at'] = timezone.now()
-                elif data['status'] == 'Delivered' and not instance.delivery_completed_at:
-                    data['delivery_completed_at'] = timezone.now()
-            
-            # Auto-update main status based on delivery_status
-            if 'delivery_status' in data:
-                if data['delivery_status'] == 'Delivered':
-                    data['status'] = 'Delivered'
+
+            if 'is_paid' in request.data:
+                derived['is_paid'] = bool(request.data['is_paid'])
+
+            delivery_status = data.get('delivery_status')
+            if delivery_status:
+                # Lock the status once it moves off Pending
+                if delivery_status != 'Pending' and not instance.delivery_status_updated_at:
+                    derived['delivery_status_updated_at'] = timezone.now()
+
+                # Completing the delivery advances the main order status, which
+                # is what the admin panel and the customer's app both read.
+                if delivery_status == 'Delivered':
+                    derived['status'] = 'Delivered'
                     if not instance.delivery_completed_at:
                         data['delivery_completed_at'] = timezone.now()
-        
+
         serializer = self.get_serializer(instance, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
+
+        if derived:
+            for field, value in derived.items():
+                setattr(instance, field, value)
+            instance.save(update_fields=list(derived))
+            # Re-serialize so the response carries the derived values too.
+            serializer = self.get_serializer(instance)
+
+        # Post the charge and the rider-collected cash to the customer's ledger.
+        # This path used to bypass the balance entirely, so cash a rider took at
+        # the door never showed up against the account.
+        from ledger.service import sync_order
+        sync_order(instance, actor=request.user)
 
         # Activity logging for rider delivery actions
         if not is_locked:
@@ -215,6 +233,12 @@ class AdminOrderListView(generics.ListCreateAPIView):
         serializer = AdminOrderCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
+
+        # Usually a no-op (a new order is not yet Delivered), but an admin can
+        # create one already marked delivered.
+        from ledger.service import sync_order
+        sync_order(order, actor=request.user)
+
         activity_log(
             request.user, 'order', 'Order Created',
             target_type='order', target_id=order.id,

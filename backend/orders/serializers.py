@@ -99,18 +99,21 @@ class AdminOrderUpdateSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         new_cash = validated_data.get('cash_amount')
         if new_cash is not None and instance.user_id:
-            old_cash = instance.cash_amount or Decimal('0')
-            delta = Decimal(str(new_cash)) - old_cash
-            if delta != 0:
-                profile = instance.user.profile
-                profile.account_balance += delta
-                profile.save(update_fields=['account_balance'])
             # Auto-resolve is_paid unless the caller explicitly set it
             if 'is_paid' not in validated_data:
                 validated_data['is_paid'] = new_cash >= instance.total_price
             if 'cash_received' not in validated_data:
                 validated_data['cash_received'] = new_cash > 0
-        return super().update(instance, validated_data)
+
+        order = super().update(instance, validated_data)
+
+        # The balance is no longer nudged by hand here. ledger.service owns
+        # account_balance and posts a journal entry for the charge and the cash,
+        # so the two can never drift apart.
+        from ledger.service import sync_order
+        sync_order(order, actor=self.context.get('request').user
+                   if self.context.get('request') else None)
+        return order
 
 
 class AdminOrderItemInputSerializer(serializers.Serializer):

@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import type { AdminOrder, AdminOrderFilters, AdminOrderSummary } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
+import { ordersApi } from "@/lib/api";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { Button, Card, PageHeader, Skeleton } from "@/components/ui";
 import {
   useAdminOrders,
@@ -77,6 +79,29 @@ export function AdminOrdersPage() {
   const summary = useAdminSummary();
   const deliveryBoys = useDeliveryBoys();
   const orders = useAdminOrders(filters);
+
+  const { setData: setOrdersData } = orders;
+  const { setData: setSummaryData } = summary;
+
+  /**
+   * Pick up rider-side changes (an order going Delivered) without the admin
+   * hitting refresh. Writes straight to the data, rather than `reload()`, so
+   * the table doesn't flash back to skeletons every poll.
+   */
+  const refreshQuietly = useCallback(async () => {
+    try {
+      const [nextOrders, nextSummary] = await Promise.all([
+        ordersApi.adminList(filters),
+        ordersApi.adminSummary(),
+      ]);
+      setOrdersData(nextOrders);
+      setSummaryData(nextSummary);
+    } catch {
+      // A failed background poll must not disturb what's already on screen.
+    }
+  }, [filters, setOrdersData, setSummaryData]);
+
+  useAutoRefresh(refreshQuietly);
 
   const handleUpdated = useCallback((updated?: AdminOrder) => {
     orders.reload();

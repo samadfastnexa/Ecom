@@ -66,6 +66,28 @@ class DeliveryRecordViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return _apply_filters(super().get_queryset(), self.request.query_params)
 
+    # ── Ledger sync ──────────────────────────────────────────────────────────
+    # Bottle deliveries are a charge and their paid_amount is a payment, so each
+    # write here has to be mirrored into the customer's ledger. sync is
+    # idempotent and posts only deltas, so re-saving an unchanged record is a
+    # no-op.
+
+    def perform_create(self, serializer):
+        record = serializer.save()
+        from ledger.service import sync_delivery_record
+        sync_delivery_record(record, actor=self.request.user)
+
+    def perform_update(self, serializer):
+        record = serializer.save()
+        from ledger.service import sync_delivery_record
+        sync_delivery_record(record, actor=self.request.user)
+
+    def perform_destroy(self, instance):
+        from ledger.service import void_delivery_record
+        # Unwind first: the entries keep a reference to the record.
+        void_delivery_record(instance, actor=self.request.user)
+        instance.delete()
+
 
 class _TypeViewSetMixin:
     """Shared behaviour for the customer-type and bottle-type endpoints:

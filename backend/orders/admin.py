@@ -61,6 +61,13 @@ class OrderAdmin(admin.ModelAdmin):
         }),
     )
     
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        # Editing status or total here must move the ledger too, otherwise the
+        # admin becomes a way to change money without an audit trail.
+        from ledger.service import sync_order
+        sync_order(obj, actor=request.user)
+
     def delivery_status(self, obj):
         if obj.assigned_delivery_boy:
             if obj.delivery_completed_at:
