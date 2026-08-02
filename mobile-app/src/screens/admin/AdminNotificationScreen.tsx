@@ -125,6 +125,7 @@ export const AdminNotificationScreen: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [history, setHistory] = useState<NotificationHistory[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
   const [testMode, setTestMode] = useState(false);
 
@@ -136,17 +137,24 @@ export const AdminNotificationScreen: React.FC = () => {
 
   const loadHistory = async () => {
     setLoadingHistory(true);
+    setHistoryError(null);
     try {
       const token = await getAuthToken();
       const res = await fetch(`${API_URL}/auth/admin/notifications/history/`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setHistory(data);
+      if (!res.ok) {
+        // Without this a failed request looked exactly like "nothing sent yet".
+        throw new Error(
+          res.status === 401 || res.status === 403
+            ? 'You do not have permission to view history.'
+            : `Could not load history (${res.status}).`,
+        );
       }
-    } catch (e) {
+      setHistory(await res.json());
+    } catch (e: any) {
       console.error('Error loading history:', e);
+      setHistoryError(e?.message || 'Could not load history.');
     } finally {
       setLoadingHistory(false);
     }
@@ -500,6 +508,16 @@ export const AdminNotificationScreen: React.FC = () => {
           {loadingHistory ? (
             <View style={styles.centerContainer}>
               <ActivityIndicator size="large" color="#007AFF" />
+            </View>
+          ) : historyError ? (
+            <View style={styles.centerContainer}>
+              <Ionicons name="alert-circle-outline" size={56} color="#FF3B30" />
+              <Text style={[styles.emptyText, { color: '#FF3B30' }]}>{historyError}</Text>
+              <TouchableOpacity onPress={loadHistory}>
+                <Text style={{ color: '#007AFF', fontWeight: '700', marginTop: 8 }}>
+                  Try again
+                </Text>
+              </TouchableOpacity>
             </View>
           ) : history.length === 0 ? (
             <View style={styles.centerContainer}>

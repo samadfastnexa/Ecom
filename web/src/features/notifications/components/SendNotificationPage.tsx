@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bell,
   Send,
@@ -28,6 +28,7 @@ import {
   type NotificationAudience,
   type NotificationTemplate,
 } from "@/lib/api";
+import type { SentNotification } from "@/lib/api/notifications";
 import { Button, Card, Input, Textarea, Modal, useToast } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
@@ -89,15 +90,6 @@ const STARTERS: {
 
 const EMOJIS = ["💧", "🚚", "📦", "🎉", "🔥", "⭐", "🙏", "💙", "⏰", "✅"];
 
-interface SentItem {
-  id: number;
-  title: string;
-  audience: NotificationAudience;
-  sent: number;
-  total: number;
-  at: string;
-}
-
 interface TemplateDraft {
   open: boolean;
   editing: NotificationTemplate | null;
@@ -125,7 +117,21 @@ export function SendNotificationPage() {
   const [audience, setAudience] = useState<NotificationAudience>("all");
   const [sending, setSending] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [history, setHistory] = useState<SentItem[]>([]);
+  const [history, setHistory] = useState<SentNotification[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
+
+  // Every broadcast ever sent, not just this page session — the server has
+  // recorded them all along, the panel simply never asked for them.
+  const loadHistory = useCallback(() => {
+    setHistoryLoading(true);
+    notificationsApi
+      .history({ limit: 20 })
+      .then(setHistory)
+      .catch(() => setHistory([]))
+      .finally(() => setHistoryLoading(false));
+  }, []);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
 
   // saved templates (server CRUD)
   const [templates, setTemplates] = useState<NotificationTemplate[]>([]);
@@ -190,17 +196,7 @@ export function SendNotificationPage() {
         body: body.trim(),
         recipient_type: audience,
       });
-      setHistory((prev) => [
-        {
-          id: Date.now(),
-          title: title.trim(),
-          audience,
-          sent: res.sent,
-          total: res.total_tokens,
-          at: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        },
-        ...prev,
-      ]);
+      loadHistory();
       notify(`Sent to ${res.sent} device${res.sent === 1 ? "" : "s"}.`);
       setTitle("");
       setBody("");
@@ -436,13 +432,17 @@ export function SendNotificationPage() {
             </p>
           </div>
 
-          {/* Session history */}
-          {history.length > 0 && (
-            <div>
-              <label className="label flex items-center gap-1.5">
-                <History size={13} />
-                Sent this session
-              </label>
+          {/* Sent history — persisted server-side */}
+          <div>
+            <label className="label flex items-center gap-1.5">
+              <History size={13} />
+              Recently sent
+            </label>
+            {historyLoading ? (
+              <p className="text-xs text-mist/40">Loading…</p>
+            ) : history.length === 0 ? (
+              <p className="text-xs text-mist/40">Nothing sent yet.</p>
+            ) : (
               <div className="flex flex-col gap-2">
                 {history.map((h) => (
                   <div
@@ -454,21 +454,29 @@ export function SendNotificationPage() {
                         {h.title}
                       </p>
                       <span className="shrink-0 text-[10px] text-mist/40">
-                        {h.at}
+                        {new Date(h.sent_at || h.created_at).toLocaleString([], {
+                          day: "numeric", month: "short",
+                          hour: "2-digit", minute: "2-digit",
+                        })}
                       </span>
                     </div>
-                    <div className="mt-1 flex items-center gap-1.5 text-[11px] text-emerald-300">
-                      <CheckCircle2 size={12} />
-                      {h.sent}/{h.total} ·{" "}
-                      <span className="text-mist/50">
-                        {audienceLabel(h.audience)}
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                      <span className={h.sent_count > 0 ? "text-emerald-300" : "text-amber-300"}>
+                        <CheckCircle2 size={12} className="inline" />{" "}
+                        {h.sent_count}/{h.total_devices}
                       </span>
+                      <span className="text-mist/50">
+                        · {audienceLabel(h.recipient_type as NotificationAudience)}
+                      </span>
+                      {h.sent_by && (
+                        <span className="text-mist/40">· by {h.sent_by}</span>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
