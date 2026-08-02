@@ -372,6 +372,13 @@ class UpdatePushTokenView(APIView):
         return Response({'status': 'Token updated'}, status=status.HTTP_200_OK)
 
 
+def _is_truthy(value):
+    """Google returns email_verified as a real bool or the string "true"."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ('true', '1')
+
+
 class GoogleAuthView(APIView):
     """Sign in or register via Google OAuth. New users are always created as customers."""
     permission_classes = (AllowAny,)
@@ -379,11 +386,42 @@ class GoogleAuthView(APIView):
     def post(self, request):
         import requests as google_req
         import re
+        from django.conf import settings as dj_settings
         from rest_framework_simplejwt.tokens import RefreshToken
 
         access_token = (request.data.get('access_token') or '').strip()
         if not access_token:
             return Response({'error': 'access_token is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        allowed_client_ids = getattr(dj_settings, 'GOOGLE_ALLOWED_CLIENT_IDS', [])
+
+        # Confirm the token was minted for one of OUR OAuth clients. Without
+        # this, a token issued to any other Google app would authenticate here,
+        # letting that app's operator sign in as any of its users.
+        if allowed_client_ids:
+            try:
+                info = google_req.get(
+                    'https://oauth2.googleapis.com/tokeninfo',
+                    params={'access_token': access_token},
+                    timeout=10,
+                )
+            except Exception:
+                return Response({'error': 'Could not reach Google servers.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+            if not info.ok:
+                return Response({'error': 'Invalid or expired Google token.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+            token_info = info.json()
+            # `aud` is the client the token was issued for; `azp` is the
+            # authorized party, which differs when e.g. the Android client
+            # obtains a token whose audience is the Web client. Either one
+            # matching our own clients is enough.
+            claimed = {token_info.get('aud'), token_info.get('azp')} - {None, ''}
+            if not claimed & set(allowed_client_ids):
+                return Response(
+                    {'error': 'This Google token was not issued for this application.'},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
 
         # Verify token & get user info from Google
         try:
@@ -403,9 +441,30 @@ class GoogleAuthView(APIView):
         if not email:
             return Response({'error': 'Google account has no email address.'}, status=status.HTTP_400_BAD_REQUEST)
 
+        # An unverified address must never match an existing account — otherwise
+        # anyone able to set that address on a Google Workspace domain could
+        # sign in as the password user who owns it here.
+        if not _is_truthy(data.get('email_verified')):
+            return Response(
+                {'error': 'Your Google email address is not verified.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         # Find existing user or create a new customer
         try:
             user = User.objects.get(email=email)
+            if not user.is_active:
+                return Response(
+                    {'error': 'This account has been disabled.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        except User.MultipleObjectsReturned:
+            # Email is not unique at the DB level; refuse rather than guess
+            # which account the caller meant.
+            return Response(
+                {'error': 'Multiple accounts share this email. Please contact support.'},
+                status=status.HTTP_409_CONFLICT,
+            )
         except User.DoesNotExist:
             base = re.sub(r'[^a-zA-Z0-9_]', '', email.split('@')[0])[:20] or 'user'
             username, counter = base, 1

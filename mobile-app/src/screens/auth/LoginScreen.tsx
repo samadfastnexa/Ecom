@@ -1,4 +1,4 @@
-import React, { useState, useContext, useEffect } from 'react';
+import React, { useState, useContext } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
@@ -9,11 +9,8 @@ import { AuthContext } from '../../context/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLanguage } from '../../context/LanguageContext';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
-import { GOOGLE_WEB_CLIENT_ID, GOOGLE_ANDROID_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '../../constants/googleConfig';
-
-WebBrowser.maybeCompleteAuthSession();
+import { GoogleSignInButton } from '../../components/GoogleSignInButton';
+import { IS_GOOGLE_SIGNIN_CONFIGURED } from '../../constants/googleConfig';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const BRAND_BLUE = '#0A84FF';
@@ -23,28 +20,9 @@ const LoginScreen = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
-  const { login, loginWithGoogle, isLoading, error } = useContext(AuthContext);
+  const { login, isLoading, error } = useContext(AuthContext);
   const { t } = useLanguage();
   const navigation = useNavigation<any>();
-
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    clientId: GOOGLE_WEB_CLIENT_ID,
-    androidClientId: GOOGLE_ANDROID_CLIENT_ID,
-    iosClientId: GOOGLE_IOS_CLIENT_ID,
-  });
-
-  useEffect(() => {
-    if (response?.type === 'success') {
-      const token = response.authentication?.accessToken;
-      if (token) {
-        setGoogleLoading(true);
-        loginWithGoogle(token)
-          .catch(() => Alert.alert('Google Sign-In Failed', 'Could not sign in with Google.'))
-          .finally(() => setGoogleLoading(false));
-      }
-    }
-  }, [response]);
 
   const handleLogin = async () => {
     if (!username || !password) {
@@ -156,30 +134,24 @@ const LoginScreen = () => {
             }
           </TouchableOpacity>
 
-          {/* Divider */}
-          <View style={styles.divider}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerOr}>OR</Text>
-            <View style={styles.dividerLine} />
-          </View>
+          {IS_GOOGLE_SIGNIN_CONFIGURED && (
+            <>
+              {/* Divider */}
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerOr}>OR</Text>
+                <View style={styles.dividerLine} />
+              </View>
 
-          {/* Google */}
-          <TouchableOpacity
-            style={styles.googleBtn}
-            onPress={() => promptAsync()}
-            disabled={!request || googleLoading || isLoading}
-            activeOpacity={0.85}
-          >
-            {googleLoading
-              ? <ActivityIndicator color="#555" />
-              : (
-                <>
-                  <Text style={styles.googleG}>G</Text>
-                  <Text style={styles.googleText}>Continue with Google</Text>
-                </>
-              )
-            }
-          </TouchableOpacity>
+              <GoogleSignInButton
+                label="Continue with Google"
+                failureTitle="Google Sign-In Failed"
+                style={styles.googleBtn}
+                textStyle={styles.googleText}
+                disabled={isLoading}
+              />
+            </>
+          )}
 
           {/* Register link */}
           <TouchableOpacity

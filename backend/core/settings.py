@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'localization',
     'plant',
     'activities',
+    'ledger',
 ]
 
 REST_FRAMEWORK = {
@@ -270,3 +271,17 @@ LOGGING = {
         },
     },
 }
+
+
+# ── Google Sign-In ────────────────────────────────────────────────────────────
+# OAuth client IDs this backend will accept tokens for, comma-separated.
+# Include every client that can sign users in: the Web client (used by the
+# Next.js site and as Expo's client ID), plus the Android and iOS clients.
+#
+# Leave empty ONLY for local development: the audience check is then skipped and
+# any valid Google token is accepted, which is unsafe on a public deployment.
+GOOGLE_ALLOWED_CLIENT_IDS = [
+    c.strip()
+    for c in os.environ.get('GOOGLE_ALLOWED_CLIENT_IDS', '').split(',')
+    if c.strip()
+]

@@ -7,6 +7,7 @@ import { UserPlus } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Button, Input, useToast } from "@/components/ui";
 import { AuthShell } from "./AuthShell";
+import { GoogleDivider, GoogleSignInButton } from "./GoogleSignInButton";
 
 const EMPTY = {
   first_name: "",
@@ -146,6 +147,18 @@ export function RegisterForm() {
           </Link>
         </p>
       </form>
+
+      <GoogleDivider />
+
+      <GoogleSignInButton
+        label="Sign up with Google"
+        disabled={loading}
+        onAuthenticated={() => {
+          notify("Account created — welcome aboard!");
+          router.push("/");
+        }}
+        onError={(msg) => setError(msg || null)}
+      />
     </AuthShell>
   );
 }

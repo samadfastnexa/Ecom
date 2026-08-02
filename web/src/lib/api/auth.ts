@@ -19,6 +19,17 @@ export const authApi = {
     return apiFetch("/auth/register/", { method: "POST", body: payload });
   },
 
+  /**
+   * Exchange a Google OAuth access token for our own JWT pair. The backend
+   * verifies the token with Google and creates a customer account on first use.
+   */
+  google(accessToken: string): Promise<AuthTokens> {
+    return apiFetch<AuthTokens>("/auth/google/", {
+      method: "POST",
+      body: { access_token: accessToken },
+    });
+  },
+
   profile(): Promise<UserProfile> {
     return apiFetch<UserProfile>("/auth/profile/", { auth: true });
   },

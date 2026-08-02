@@ -24,6 +24,16 @@ export const MEDIA_URL = USE_LOCAL
   ? LOCAL_MEDIA_URL
   : process.env.NEXT_PUBLIC_MEDIA_URL || LIVE_MEDIA_URL;
 
+/**
+ * Google OAuth **Web application** client ID, from Google Cloud Console →
+ * APIs & Services → Credentials (project `ecom-c08aa`). The site's origin must
+ * be listed under that client's "Authorized JavaScript origins".
+ *
+ * Empty means Google sign-in is simply not offered — the buttons hide instead
+ * of rendering something that fails on click.
+ */
+export const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
+
 export const STORAGE_KEYS = {
   access: "ecom_access",
   refresh: "ecom_refresh",

@@ -5,7 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { User, Lock, LogIn, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Button, Input } from "@/components/ui";
+import type { UserProfile } from "@/lib/types";
 import { AuthShell } from "./AuthShell";
+import { GoogleDivider, GoogleSignInButton } from "./GoogleSignInButton";
 
 export function LoginForm() {
   const { login } = useAuth();
@@ -19,17 +21,21 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  /** Same destination rules whether the user signed in with a password or Google. */
+  const goAfterLogin = (profile: UserProfile | null) => {
+    if (next !== "/") {
+      router.push(next);
+    } else {
+      router.push(profile?.is_staff ? "/manage/orders" : "/");
+    }
+  };
+
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
     try {
-      const profile = await login(username, password);
-      if (next !== "/") {
-        router.push(next);
-      } else {
-        router.push(profile?.is_staff ? "/manage/orders" : "/");
-      }
+      goAfterLogin(await login(username, password));
     } catch {
       setError("Invalid username or password.");
     } finally {
@@ -87,6 +93,15 @@ export function LoginForm() {
           <LogIn size={18} /> Sign in
         </Button>
       </form>
+
+      <GoogleDivider />
+
+      <GoogleSignInButton
+        label="Sign in with Google"
+        disabled={loading}
+        onAuthenticated={goAfterLogin}
+        onError={(msg) => setError(msg || null)}
+      />
     </AuthShell>
   );
 }
