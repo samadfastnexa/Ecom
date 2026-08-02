@@ -8,10 +8,7 @@ import { RootStackParamList } from '../types/navigation';
 type Props = NativeStackScreenProps<RootStackParamList, 'OrderSuccess'>;
 
 export const OrderSuccessScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { orderId, total, paymentMethod } = route.params;
-
-  const paymentLabel =
-    paymentMethod === 'COD' ? 'Cash on Delivery' : paymentMethod;
+  const { orderId, total } = route.params;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -40,17 +37,8 @@ export const OrderSuccessScreen: React.FC<Props> = ({ route, navigation }) => {
           <View style={styles.divider} />
           <View style={styles.row}>
             <Text style={styles.label}>Payment Method</Text>
-            <Text style={styles.value}>{paymentLabel}</Text>
+            <Text style={styles.value}>Cash on Delivery</Text>
           </View>
-          {paymentMethod !== 'COD' && (
-            <>
-              <View style={styles.divider} />
-              <Text style={styles.paymentNote}>
-                Please approve the payment request on your {paymentMethod} app
-                to complete your order.
-              </Text>
-            </>
-          )}
         </View>
 
         <TouchableOpacity

@@ -19,7 +19,6 @@ import {
 import type {
   CreateAdminOrderPayload,
   CustomerOrderStats,
-  PaymentMethod,
   Product,
 } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
@@ -190,8 +189,6 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [address, setAddress] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("COD");
-  const [paymentNumber, setPaymentNumber] = useState("");
   const [riderId, setRiderId] = useState<number | "">("");
   const [deliveryNotes, setDeliveryNotes] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -214,8 +211,6 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
       setGuestName("");
       setGuestPhone("");
       setAddress("");
-      setPaymentMethod("COD");
-      setPaymentNumber("");
       setRiderId("");
       setDeliveryNotes("");
       setCart([]);
@@ -262,8 +257,7 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
 
     const payload: CreateAdminOrderPayload = {
       shipping_address: address,
-      payment_method: paymentMethod,
-      payment_number: paymentNumber || undefined,
+      payment_method: "COD",
       assigned_delivery_boy: riderId || null,
       delivery_notes: deliveryNotes || undefined,
       status: "Processing",
@@ -424,29 +418,10 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
           )}
         </div>
 
-        {/* Payment */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="label">Payment method</label>
-            <select
-              value={paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-              className="input text-sm"
-            >
-              <option value="COD">Cash on Delivery</option>
-              <option value="JazzCash">JazzCash</option>
-              <option value="EasyPaisa">EasyPaisa</option>
-            </select>
-          </div>
-          {paymentMethod !== "COD" && (
-            <Input
-              label="Payment number"
-              placeholder="03xx-xxxxxxx"
-              value={paymentNumber}
-              onChange={(e) => setPaymentNumber(e.target.value)}
-              icon={<CreditCard size={15} />}
-            />
-          )}
+        {/* Payment — cash only, so there is nothing to pick */}
+        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
+          <CreditCard size={15} className="text-wave" />
+          <span className="text-sm text-mist/70">Payment: Cash on Delivery</span>
         </div>
 
         {/* Rider assignment */}

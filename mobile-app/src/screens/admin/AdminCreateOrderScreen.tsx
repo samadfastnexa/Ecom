@@ -15,7 +15,6 @@ interface CartItem {
   quantity: number;
 }
 
-const PAYMENT_METHODS = ['COD', 'JazzCash', 'EasyPaisa'];
 
 export const AdminCreateOrderScreen: React.FC = () => {
   const navigation = useNavigation();
@@ -30,8 +29,8 @@ export const AdminCreateOrderScreen: React.FC = () => {
   const [guestName, setGuestName] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
   const [address, setAddress] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('COD');
-  const [paymentNumber, setPaymentNumber] = useState('');
+  // Cash-only business — no picker needed.
+  const paymentMethod = 'COD';
   const [selectedRiderId, setSelectedRiderId] = useState<number | null>(null);
   const [deliveryNotes, setDeliveryNotes] = useState('');
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -89,8 +88,7 @@ export const AdminCreateOrderScreen: React.FC = () => {
 
     const payload: any = {
       shipping_address: address,
-      payment_method: paymentMethod,
-      payment_number: paymentNumber || undefined,
+      payment_method: 'COD',
       assigned_delivery_boy: selectedRiderId || null,
       delivery_notes: deliveryNotes || undefined,
       status: 'Processing',
@@ -264,27 +262,11 @@ export const AdminCreateOrderScreen: React.FC = () => {
       {/* Payment */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Payment</Text>
-        <View style={styles.paymentRow}>
-          {PAYMENT_METHODS.map(m => (
-            <TouchableOpacity
-              key={m}
-              style={[styles.paymentBtn, paymentMethod === m && styles.paymentBtnActive]}
-              onPress={() => setPaymentMethod(m)}
-            >
-              <Text style={[styles.paymentBtnText, paymentMethod === m && styles.paymentBtnTextActive]}>{m}</Text>
-            </TouchableOpacity>
-          ))}
+        <View style={[styles.paymentBtn, styles.paymentBtnActive]}>
+          <Text style={[styles.paymentBtnText, styles.paymentBtnTextActive]}>
+            Cash on Delivery
+          </Text>
         </View>
-        {paymentMethod !== 'COD' && (
-          <TextInput
-            style={styles.input}
-            placeholder="Payment number"
-            value={paymentNumber}
-            onChangeText={setPaymentNumber}
-            keyboardType="phone-pad"
-            placeholderTextColor="#aaa"
-          />
-        )}
       </View>
 
       {/* Rider */}

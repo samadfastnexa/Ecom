@@ -20,8 +20,6 @@ export function CheckoutView() {
   const notify = useToast();
 
   const [address, setAddress] = useState(user?.address || "");
-  const [payment, setPayment] = useState<PaymentMethod>("COD");
-  const [payNumber, setPayNumber] = useState(user?.phone_number || "");
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,11 +40,6 @@ export function CheckoutView() {
       setError("Please enter a shipping address.");
       return;
     }
-    if (payment !== "COD" && payNumber.trim().length < 10) {
-      setError("Enter a valid mobile number for mobile payment.");
-      return;
-    }
-
     setPlacing(true);
     try {
       const order = await ordersApi.create({
@@ -57,8 +50,8 @@ export function CheckoutView() {
         })),
         total_price: total.toFixed(2),
         shipping_address: address,
-        payment_method: payment,
-        payment_number: payment !== "COD" ? payNumber : null,
+        payment_method: "COD",
+        payment_number: null,
       });
       clear();
       notify(`Order #${order.id} placed successfully!`);
@@ -77,12 +70,7 @@ export function CheckoutView() {
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-2">
           <AddressForm value={address} onChange={setAddress} />
-          <PaymentSelector
-            value={payment}
-            onChange={setPayment}
-            number={payNumber}
-            onNumberChange={setPayNumber}
-          />
+          <PaymentSelector />
         </div>
 
         <div className="lg:col-span-1">

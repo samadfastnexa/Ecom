@@ -25,8 +25,9 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
   const { t } = useLanguage();
 
   const [shippingAddress, setShippingAddress] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('COD');
-  const [mobileNumber, setMobileNumber] = useState('');
+  // Cash-only business: the method is fixed, kept as a constant so the
+  // existing option renderer and the success screen keep working unchanged.
+  const paymentMethod = 'COD';
   const [loading, setLoading] = useState(false);
   const [savedAddresses, setSavedAddresses] = useState<string[]>([]);
   const [showAddressPicker, setShowAddressPicker] = useState(false);
@@ -72,11 +73,6 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
       return;
     }
 
-    if ((paymentMethod === 'JazzCash' || paymentMethod === 'EasyPaisa') && !mobileNumber.trim()) {
-      Alert.alert(t('error', 'Error'), `Please enter your ${paymentMethod} mobile number`);
-      return;
-    }
-
     if (items.length === 0) {
       Alert.alert(t('error', 'Error'), t('error_cart_empty', 'Your cart is empty'));
       return;
@@ -92,8 +88,8 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
         })),
         total_price: total,
         shipping_address: shippingAddress,
-        payment_method: paymentMethod,
-        payment_number: mobileNumber,
+        payment_method: 'COD',
+        payment_number: null,
       };
 
       const createdOrder = await createOrder(orderPayload);
@@ -111,23 +107,17 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
+  /** Single, always-selected option — there is nothing else to pick. */
   const renderPaymentOption = (id: string, label: string, color: string) => (
-    <TouchableOpacity
+    <View
       key={id}
-      style={[
-        styles.paymentOption,
-        paymentMethod === id && styles.selectedPaymentOption,
-        { borderColor: paymentMethod === id ? color : '#e0e0e0' },
-      ]}
-      onPress={() => setPaymentMethod(id)}
+      style={[styles.paymentOption, styles.selectedPaymentOption, { borderColor: color }]}
     >
-      <View style={[styles.radio, paymentMethod === id && { borderColor: color }]}>
-        {paymentMethod === id && <View style={[styles.radioInner, { backgroundColor: color }]} />}
+      <View style={[styles.radio, { borderColor: color }]}>
+        <View style={[styles.radioInner, { backgroundColor: color }]} />
       </View>
-      <Text style={[styles.paymentLabel, paymentMethod === id && { color, fontWeight: 'bold' }]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
+      <Text style={[styles.paymentLabel, { color, fontWeight: 'bold' }]}>{label}</Text>
+    </View>
   );
 
   return (
@@ -221,26 +211,11 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>{t('payment_method', 'Payment Method')}</Text>
 
+        {/* Cash only — nothing to choose */}
         {renderPaymentOption('COD', t('cod_label', 'Cash on Delivery'), '#2ecc71')}
-        {renderPaymentOption('JazzCash', 'JazzCash', '#e74c3c')}
-        {renderPaymentOption('EasyPaisa', 'EasyPaisa', '#27ae60')}
-
-        {(paymentMethod === 'JazzCash' || paymentMethod === 'EasyPaisa') && (
-          <View style={styles.mobileInputContainer}>
-            <Text style={styles.inputLabel}>{t('mobile_number_label', 'Mobile Number')}</Text>
-            <TextInput
-              style={styles.mobileInput}
-              placeholder={t('mobile_placeholder', '03XXXXXXXXX')}
-              keyboardType="phone-pad"
-              value={mobileNumber}
-              onChangeText={setMobileNumber}
-              maxLength={11}
-            />
-            <Text style={styles.helperText}>
-              Enter your {paymentMethod} account number. You will receive a payment prompt on your phone.
-            </Text>
-          </View>
-        )}
+        <Text style={styles.helperText}>
+          {t('cod_only_note', 'Pay the rider in cash when your order arrives.')}
+        </Text>
       </View>
 
       <TouchableOpacity
@@ -252,9 +227,7 @@ export const CheckoutScreen: React.FC<Props> = ({ navigation }) => {
           <ActivityIndicator color="#fff" />
         ) : (
           <Text style={styles.placeOrderText}>
-            {paymentMethod === 'COD'
-              ? t('place_order', 'Place Order')
-              : `${t('pay_via', 'Pay via')} ${paymentMethod}`}
+            {t('place_order', 'Place Order')}
           </Text>
         )}
       </TouchableOpacity>

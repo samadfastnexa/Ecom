@@ -45,7 +45,8 @@ export type OrderStatus =
   | "Delivered"
   | "Cancelled";
 
-export type PaymentMethod = "COD" | "JazzCash" | "EasyPaisa";
+/** Cash on delivery only — the business does not accept mobile wallets. */
+export type PaymentMethod = "COD";
 
 export interface Order {
   id: number;
