@@ -1,11 +1,12 @@
 import type { ComponentType } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Tag, Users, GlassWater, Smartphone, Languages } from "lucide-react";
+import { Tag, Users, GlassWater, Smartphone, Languages, MapPin } from "lucide-react";
 import { PricingSettings } from "./components/sections/PricingSettings";
 import { CustomerTypesSettings } from "./components/sections/CustomerTypesSettings";
 import { BottleTypesSettings } from "./components/sections/BottleTypesSettings";
 import { MobileProfileSettings } from "./components/sections/MobileProfileSettings";
 import { LanguageSettings } from "./components/sections/LanguageSettings";
+import { AreasSettings } from "./components/sections/AreasSettings";
 
 export interface SettingsSectionEntry {
   id: string;
@@ -21,6 +22,7 @@ export interface SettingsSectionEntry {
  */
 export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   { id: "pricing", label: "Pricing", icon: Tag, Component: PricingSettings },
+  { id: "areas", label: "Delivery Areas", icon: MapPin, Component: AreasSettings },
   {
     id: "customer-types",
     label: "Customer Types",

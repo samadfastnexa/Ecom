@@ -9,6 +9,7 @@ export { staffApi } from "./staff";
 export { customersApi } from "./customers";
 export { passwordApi } from "./password";
 export { ledgerApi } from "./ledger";
+export { areasApi } from "./areas";
 export { localizationApi } from "./localization";
 export {
   notificationsApi,

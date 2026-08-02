@@ -7,13 +7,13 @@ from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from .serializers import (
-    RegisterSerializer, UserSerializer,
+    AreaSerializer, RegisterSerializer, UserSerializer,
     UpdateProfileSerializer, ChangePasswordSerializer,
     StaffProfileSerializer, CreateStaffSerializer, UpdateStaffSerializer,
     NotificationTemplateSerializer,
 )
 from .models import (
-    UserProfile, MobileProfileConfig, PROFILE_FIELD_DEFAULTS,
+    Area, UserProfile, MobileProfileConfig, PROFILE_FIELD_DEFAULTS,
     NotificationTemplate,
 )
 from activities.service import log as activity_log
@@ -22,6 +22,36 @@ from activities.service import log as activity_log
 class IsStaff(BasePermission):
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated and request.user.is_staff)
+
+
+class AreaListView(generics.ListAPIView):
+    """
+    Public: the areas offered on the signup form.
+
+    Unauthenticated because signup happens before there is a user, and the
+    list is not sensitive — it is the localities the business delivers to.
+    Only active areas are returned.
+    """
+    permission_classes = (AllowAny,)
+    serializer_class = AreaSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        return Area.objects.filter(is_active=True)
+
+
+class AdminAreaListCreateView(generics.ListCreateAPIView):
+    """Staff-managed area list — includes inactive ones."""
+    permission_classes = (IsStaff,)
+    serializer_class = AreaSerializer
+    queryset = Area.objects.all()
+    pagination_class = None
+
+
+class AdminAreaDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = (IsStaff,)
+    serializer_class = AreaSerializer
+    queryset = Area.objects.all()
 
 
 class RegisterView(generics.CreateAPIView):

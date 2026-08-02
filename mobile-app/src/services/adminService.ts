@@ -603,6 +603,26 @@ export const adminService = {
     });
   },
 
+  getAreas(): Promise<PricedType[]> {
+    return adminFetch('/auth/admin/areas/');
+  },
+
+  createArea(name: string): Promise<PricedType> {
+    return adminFetch('/auth/admin/areas/', {
+      method: 'POST', body: JSON.stringify({ name }),
+    });
+  },
+
+  updateArea(id: number, data: { name?: string; is_active?: boolean; order?: number }): Promise<PricedType> {
+    return adminFetch(`/auth/admin/areas/${id}/`, {
+      method: 'PATCH', body: JSON.stringify(data),
+    });
+  },
+
+  deleteArea(id: number): Promise<void> {
+    return adminFetch(`/auth/admin/areas/${id}/`, { method: 'DELETE' });
+  },
+
   voidLedgerEntry(entryId: number, reason: string): Promise<LedgerEntry> {
     return adminFetch(`/ledger/entries/${entryId}/void/`, {
       method: 'POST',
@@ -697,3 +717,4 @@ export interface LedgerSummary {
   last_entry_date: string | null;
   last_payment: { date: string; amount: string; receipt_number: string | null } | null;
 }
+

@@ -56,6 +56,7 @@ function TypeList({
   update,
   remove,
   namePlaceholder,
+  showPrice = true,
 }: {
   title: string;
   icon: keyof typeof Ionicons.glyphMap;
@@ -65,6 +66,8 @@ function TypeList({
   update: (id: number, data: { is_active?: boolean }) => Promise<PricedType>;
   remove: (id: number) => Promise<void>;
   namePlaceholder: string;
+  /** Areas have no price; every other list does. */
+  showPrice?: boolean;
 }) {
   const [items, setItems] = useState<PricedType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,14 +142,16 @@ function TypeList({
           value={name}
           onChangeText={setName}
         />
-        <TextInput
-          style={[styles.addInput, { flex: 1 }]}
-          placeholder="Price (opt.)"
-          placeholderTextColor="#bbb"
-          value={price}
-          onChangeText={setPrice}
-          keyboardType="decimal-pad"
-        />
+        {showPrice && (
+          <TextInput
+            style={[styles.addInput, { flex: 1 }]}
+            placeholder="Price (opt.)"
+            placeholderTextColor="#bbb"
+            value={price}
+            onChangeText={setPrice}
+            keyboardType="decimal-pad"
+          />
+        )}
         <TouchableOpacity
           style={[styles.addBtn, (!name.trim() || adding) && { opacity: 0.5 }]}
           onPress={handleAdd}
@@ -486,6 +491,18 @@ export const AdminSettingsScreen: React.FC = () => (
       update={(id, d) => adminService.updateCustomerType(id, d)}
       remove={id => adminService.deleteCustomerType(id)}
       namePlaceholder="e.g. Residential, Office"
+    />
+
+    <TypeList
+      title="Delivery Areas"
+      icon="location"
+      color="#FF9500"
+      load={() => adminService.getAreas()}
+      create={n => adminService.createArea(n)}
+      update={(id, d) => adminService.updateArea(id, d)}
+      remove={id => adminService.deleteArea(id)}
+      namePlaceholder="e.g. Johar Town, Wapda Town"
+      showPrice={false}
     />
 
     <MobileProfileSection />

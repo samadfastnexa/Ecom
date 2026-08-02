@@ -4,6 +4,7 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 from .views import (
+    AreaListView, AdminAreaListCreateView, AdminAreaDetailView,
     RegisterView, UserProfileView, ChangePasswordView, UpdatePushTokenView,
     AdminStaffListCreateView, AdminStaffDetailView,
     AdminStaffDocumentView, AdminStaffHistoryView,
@@ -15,6 +16,10 @@ from .views import (
 
 urlpatterns = [
     path('register/', RegisterView.as_view(), name='register'),
+    # Public — powers the signup form's area dropdown
+    path('areas/', AreaListView.as_view(), name='area-list'),
+    path('admin/areas/', AdminAreaListCreateView.as_view(), name='admin-area-list'),
+    path('admin/areas/<int:pk>/', AdminAreaDetailView.as_view(), name='admin-area-detail'),
     path('google/', GoogleAuthView.as_view(), name='google_auth'),
     path('login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),

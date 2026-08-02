@@ -65,6 +65,33 @@ class MobileProfileConfig(models.Model):
         return f'MobileProfileConfig({self.user_type})'
 
 
+class Area(models.Model):
+    """
+    Admin-managed list of delivery localities (Johar Town, Wapda Town, …).
+
+    Offered as suggestions on the signup form. A customer may still type an
+    area that is not on the list, so `UserProfile.area` is free text rather
+    than a foreign key — the list drives the dropdown, it does not constrain it.
+    """
+
+    name = models.CharField(max_length=120, unique=True)
+    is_active = models.BooleanField(
+        default=True, help_text="Uncheck to hide from the signup dropdown.",
+    )
+    order = models.PositiveIntegerField(
+        default=0, help_text="Lower numbers appear first.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['order', 'name']
+        verbose_name = 'Area'
+        verbose_name_plural = 'Areas'
+
+    def __str__(self):
+        return self.name
+
+
 class UserProfile(models.Model):
     USER_TYPE_CHOICES = [
         ('customer', 'Customer'),
@@ -99,7 +126,15 @@ class UserProfile(models.Model):
         max_length=50, blank=True, null=True,
         help_text="Ground floor / 1st floor / etc. — optional",
     )
-    block_area = models.CharField(max_length=150, blank=True, null=True)
+    block = models.CharField(
+        max_length=100, blank=True, null=True,
+        help_text="Block or street within the area — optional",
+    )
+    area = models.CharField(
+        max_length=150, blank=True, null=True,
+        help_text="Locality, e.g. Johar Town. Suggested from the Area list, "
+                  "but a customer may enter their own.",
+    )
     current_location = models.CharField(max_length=255, blank=True, null=True)
     is_available = models.BooleanField(default=True)
     vehicle_type = models.CharField(max_length=50, blank=True, null=True)
@@ -154,7 +189,7 @@ class UserProfile(models.Model):
 
     def compose_address(self):
         """Join the structured parts into a single human-readable address line."""
-        parts = [self.house_number, self.portion, self.block_area]
+        parts = [self.house_number, self.portion, self.block, self.area]
         return ', '.join(p.strip() for p in parts if p and p.strip())
 
     def sync_address(self):

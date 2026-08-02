@@ -247,7 +247,8 @@ export interface RegisterPayload {
   /** Structured delivery address — the backend composes these into `address`. */
   house_number: string;
   portion?: string;
-  block_area: string;
+  block?: string;
+  area: string;
 }
 
 export interface UpdateProfilePayload {
@@ -622,6 +623,14 @@ export interface ManualEntryInput {
   bottles_out?: number;
   bottles_in?: number;
   notes?: string;
+}
+
+/** Admin-managed delivery locality offered on the signup form. */
+export interface Area {
+  id: number;
+  name: string;
+  is_active: boolean;
+  order: number;
 }
 
 export interface AuthTokens {

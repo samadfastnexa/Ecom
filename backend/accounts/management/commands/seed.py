@@ -13,7 +13,7 @@ translation strings to match the code.
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from accounts.models import MobileProfileConfig, PROFILE_FIELD_DEFAULTS
+from accounts.models import Area, MobileProfileConfig, PROFILE_FIELD_DEFAULTS
 from localization.models import (
     LanguageAccessSetting,
     Translation,
@@ -53,6 +53,13 @@ BOTTLE_TYPES = [
     {'name': 'Sprinkle', 'order': 3},
 ]
 
+# Delivery localities offered on the signup form. Admins add more in Settings.
+AREAS = [
+    {'name': 'Johar Town', 'order': 1},
+    {'name': 'Wapda Town', 'order': 2},
+    {'name': 'Jubilee Town', 'order': 3},
+]
+
 # user_types allowed to switch the app language by default
 DEFAULT_LANGUAGE_USER_TYPES = ['customer', 'delivery_boy']
 
@@ -77,6 +84,7 @@ class Command(BaseCommand):
         self._seed_delivery_statuses()
         self._seed_customer_types()
         self._seed_bottle_types()
+        self._seed_areas()
         self._seed_plant_settings()
         self._seed_language_access()
         self._seed_profile_configs()
@@ -131,6 +139,14 @@ class Command(BaseCommand):
         self.stdout.write('Bottle types:')
         for data in BOTTLE_TYPES:
             _, created = BottleType.objects.get_or_create(
+                name=data['name'], defaults={'order': data['order'], 'is_active': True},
+            )
+            self._line(created, data['name'])
+
+    def _seed_areas(self):
+        self.stdout.write('Areas:')
+        for data in AREAS:
+            _, created = Area.objects.get_or_create(
                 name=data['name'], defaults={'order': data['order'], 'is_active': True},
             )
             self._line(created, data['name'])

@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { AuthContext, type AuthError } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -6,6 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { GoogleSignInButton } from '../../components/GoogleSignInButton';
 import { IS_GOOGLE_SIGNIN_CONFIGURED } from '../../constants/googleConfig';
+import { API_URL } from '../../constants/config';
 
 const BRAND_BLUE = '#0A84FF';
 const TEXT_DARK = '#1a1a1a';
@@ -50,7 +51,10 @@ const RegisterScreen = () => {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [houseNumber, setHouseNumber] = useState('');
   const [portion, setPortion] = useState('');
-  const [blockArea, setBlockArea] = useState('');
+  const [block, setBlock] = useState('');
+  const [area, setArea] = useState('');
+  const [customArea, setCustomArea] = useState(false);
+  const [areas, setAreas] = useState<{ id: number; name: string }[]>([]);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -75,6 +79,15 @@ const RegisterScreen = () => {
   const isPhoneValid = PHONE_PATTERN.test(stripPhoneSeparators(phoneNumber));
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
+  // Admin-defined localities. Public endpoint, because signup happens before
+  // there is a user. Failure is non-fatal: the field falls back to free text.
+  useEffect(() => {
+    fetch(`${API_URL}/auth/areas/`)
+      .then(res => (res.ok ? res.json() : []))
+      .then(data => Array.isArray(data) && setAreas(data))
+      .catch(() => setCustomArea(true));
+  }, []);
+
   /** Update a field and drop any stale error sitting on it. */
   const bind = (field: string, setValue: (v: string) => void) => (value: string) => {
     setValue(value);
@@ -97,7 +110,7 @@ const RegisterScreen = () => {
     else if (!isPhoneValid) errors.phone_number = t('phone_invalid', 'Enter a valid mobile number, e.g. 0300-1234567');
 
     if (!houseNumber.trim()) errors.house_number = required;
-    if (!blockArea.trim()) errors.block_area = required;
+    if (!area.trim()) errors.area = required;
 
     if (!password) errors.password = required;
     else if (!isPasswordValid) errors.password = t('password_weak', 'Your password does not meet all the requirements below');
@@ -128,7 +141,8 @@ const RegisterScreen = () => {
         phone_number: stripPhoneSeparators(phoneNumber),
         house_number: houseNumber.trim(),
         portion: portion.trim(),
-        block_area: blockArea.trim(),
+        block: block.trim(),
+        area: area.trim(),
       });
       // Navigation is handled by AuthContext state change or manual navigation if auto-login not implemented
     } catch (e) {
@@ -310,43 +324,85 @@ const RegisterScreen = () => {
             </Text>
           </View>
 
-          <View style={styles.inputContainer}>
-            <FieldLabel text={t('house_number_label', 'House Number')} required />
-            <TextInput
-              style={[styles.input, fieldErrors.house_number && styles.inputInvalid]}
-              placeholder={t('house_number_placeholder', 'e.g. H-12 or 45-A')}
-              placeholderTextColor={PLACEHOLDER}
-              value={houseNumber}
-              onChangeText={bind('house_number', setHouseNumber)}
-              maxLength={50}
-            />
-            <FieldError message={fieldErrors.house_number} />
+          {/* House / Portion / Block share one row — they are short values
+              that belong together, and it keeps the form from running long. */}
+          <View style={styles.addressRow}>
+            <View style={styles.addressCol}>
+              <FieldLabel text={t('house_number_label', 'House')} required />
+              <TextInput
+                style={[styles.input, fieldErrors.house_number && styles.inputInvalid]}
+                placeholder={t('house_number_placeholder', 'H-12')}
+                placeholderTextColor={PLACEHOLDER}
+                value={houseNumber}
+                onChangeText={bind('house_number', setHouseNumber)}
+                maxLength={50}
+              />
+            </View>
+            <View style={styles.addressCol}>
+              <FieldLabel text={t('portion_label', 'Portion')} />
+              <TextInput
+                style={[styles.input, fieldErrors.portion && styles.inputInvalid]}
+                placeholder={t('portion_placeholder', 'Ground')}
+                placeholderTextColor={PLACEHOLDER}
+                value={portion}
+                onChangeText={bind('portion', setPortion)}
+                maxLength={50}
+              />
+            </View>
+            <View style={styles.addressCol}>
+              <FieldLabel text={t('block_label', 'Block')} />
+              <TextInput
+                style={[styles.input, fieldErrors.block && styles.inputInvalid]}
+                placeholder={t('block_placeholder', 'Block 6')}
+                placeholderTextColor={PLACEHOLDER}
+                value={block}
+                onChangeText={bind('block', setBlock)}
+                maxLength={100}
+              />
+            </View>
           </View>
+          <FieldError message={fieldErrors.house_number || fieldErrors.portion || fieldErrors.block} />
 
           <View style={styles.inputContainer}>
-            <FieldLabel text={t('portion_label', 'Portion')} />
-            <TextInput
-              style={[styles.input, fieldErrors.portion && styles.inputInvalid]}
-              placeholder={t('portion_placeholder', 'e.g. Ground Floor, 1st Floor')}
-              placeholderTextColor={PLACEHOLDER}
-              value={portion}
-              onChangeText={bind('portion', setPortion)}
-              maxLength={50}
-            />
-            <FieldError message={fieldErrors.portion} />
-          </View>
-
-          <View style={styles.inputContainer}>
-            <FieldLabel text={t('block_area_label', 'Block / Area')} required />
-            <TextInput
-              style={[styles.input, fieldErrors.block_area && styles.inputInvalid]}
-              placeholder={t('block_area_placeholder', 'e.g. Block 6, Gulshan-e-Iqbal')}
-              placeholderTextColor={PLACEHOLDER}
-              value={blockArea}
-              onChangeText={bind('block_area', setBlockArea)}
-              maxLength={150}
-            />
-            <FieldError message={fieldErrors.block_area} />
+            <FieldLabel text={t('area_label', 'Area')} required />
+            {areas.length > 0 && (
+              <View style={styles.areaChips}>
+                {areas.map(a => {
+                  const active = area === a.name;
+                  return (
+                    <TouchableOpacity
+                      key={a.id}
+                      style={[styles.areaChip, active && styles.areaChipActive]}
+                      onPress={() => { bind('area', setArea)(a.name); setCustomArea(false); }}
+                    >
+                      <Text style={[styles.areaChipText, active && styles.areaChipTextActive]}>
+                        {a.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                <TouchableOpacity
+                  style={[styles.areaChip, customArea && styles.areaChipActive]}
+                  onPress={() => { setCustomArea(true); bind('area', setArea)(''); }}
+                >
+                  <Text style={[styles.areaChipText, customArea && styles.areaChipTextActive]}>
+                    {t('area_other', 'Other…')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {(customArea || areas.length === 0) && (
+              <TextInput
+                style={[styles.input, fieldErrors.area && styles.inputInvalid]}
+                placeholder={t('area_placeholder', 'Type your area')}
+                placeholderTextColor={PLACEHOLDER}
+                value={area}
+                onChangeText={bind('area', setArea)}
+                maxLength={150}
+                autoFocus={customArea}
+              />
+            )}
+            <FieldError message={fieldErrors.area} />
             <Text style={styles.helperText}>
               {t('address_hint', 'We use this as your default delivery address')}
             </Text>
@@ -552,6 +608,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  addressRow: { flexDirection: 'row', gap: 8, marginBottom: 15 },
+  addressCol: { flex: 1 },
+  areaChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  areaChip: {
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 16,
+    borderWidth: 1, borderColor: '#ddd', backgroundColor: '#fafafa',
+  },
+  areaChipActive: { backgroundColor: '#0A84FF', borderColor: '#0A84FF' },
+  areaChipText: { fontSize: 13, fontWeight: '600', color: '#666' },
+  areaChipTextActive: { color: '#fff' },
   inputInvalid: {
     borderColor: '#D93025',
     backgroundColor: '#FFF7F7',

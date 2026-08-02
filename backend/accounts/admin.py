@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.models import User, Group, Permission
 from django.contrib.auth.admin import UserAdmin, GroupAdmin as BaseGroupAdmin
 from django.utils.html import format_html
-from .models import UserProfile, NotificationHistory
+from .models import Area, UserProfile, NotificationHistory
 
 class UserProfileInline(admin.StackedInline):
     model = UserProfile
@@ -157,6 +157,14 @@ class CustomUserAdmin(UserAdmin):
             user.save()
         self.message_user(request, f"{queryset.count()} user(s) assigned to Admin role")
     assign_admin_role.short_description = "Assign Admin role to selected users"
+
+@admin.register(Area)
+class AreaAdmin(admin.ModelAdmin):
+    list_display = ('name', 'is_active', 'order', 'created_at')
+    list_editable = ('is_active', 'order')
+    search_fields = ('name',)
+    ordering = ('order', 'name')
+
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):

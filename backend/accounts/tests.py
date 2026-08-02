@@ -6,6 +6,7 @@ from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 from rest_framework import status
 from rest_framework import status as http_status
+from accounts.models import Area
 
 class AuthenticationTests(TestCase):
     def setUp(self):
@@ -23,7 +24,8 @@ class AuthenticationTests(TestCase):
             'phone_number': '0300-1234567',
             'house_number': 'H-12',
             'portion': 'Ground Floor',
-            'block_area': 'Block 6, Gulshan-e-Iqbal',
+            'block': 'Block 6',
+            'area': 'Gulshan-e-Iqbal',
         }
 
     def test_registration(self):
@@ -38,7 +40,8 @@ class AuthenticationTests(TestCase):
         self.assertEqual(profile.phone_number, '03001234567')  # normalized
         self.assertEqual(profile.house_number, 'H-12')
         self.assertEqual(profile.portion, 'Ground Floor')
-        self.assertEqual(profile.block_area, 'Block 6, Gulshan-e-Iqbal')
+        self.assertEqual(profile.block, 'Block 6')
+        self.assertEqual(profile.area, 'Gulshan-e-Iqbal')
         self.assertEqual(
             profile.address, 'H-12, Ground Floor, Block 6, Gulshan-e-Iqbal'
         )
@@ -52,7 +55,7 @@ class AuthenticationTests(TestCase):
         self.assertEqual(profile.address, 'H-12, Block 6, Gulshan-e-Iqbal')
 
     def test_phone_and_address_are_required(self):
-        for field in ('phone_number', 'house_number', 'block_area'):
+        for field in ('phone_number', 'house_number', 'area'):
             with self.subTest(field=field):
                 data = self.user_data.copy()
                 data.pop(field)
@@ -275,3 +278,86 @@ class GoogleAuthTests(TestCase):
     def test_missing_token_rejected(self):
         response = self.client.post(self.URL, {}, format='json')
         self.assertEqual(response.status_code, http_status.HTTP_400_BAD_REQUEST)
+
+
+class AreaTests(TestCase):
+    """Admin-managed delivery localities offered on the signup form."""
+
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            username='areaadmin', password='Pass1234!', is_staff=True
+        )
+        self.customer = User.objects.create_user(username='areacust', password='Pass1234!')
+        Area.objects.create(name='Johar Town', order=1)
+        Area.objects.create(name='Wapda Town', order=2)
+        Area.objects.create(name='Old Town', order=3, is_active=False)
+
+    def test_area_list_is_public(self):
+        """Signup happens before login, so the dropdown must not need auth."""
+        res = self.client.get('/api/auth/areas/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        names = [a['name'] for a in res.data]
+        self.assertIn('Johar Town', names)
+
+    def test_public_list_hides_inactive_areas(self):
+        res = self.client.get('/api/auth/areas/')
+        self.assertNotIn('Old Town', [a['name'] for a in res.data])
+
+    def test_public_list_is_ordered(self):
+        res = self.client.get('/api/auth/areas/')
+        self.assertEqual([a['name'] for a in res.data], ['Johar Town', 'Wapda Town'])
+
+    def test_admin_sees_inactive_areas(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.get('/api/auth/admin/areas/')
+        self.assertIn('Old Town', [a['name'] for a in res.data])
+
+    def test_admin_can_create_area(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.post('/api/auth/admin/areas/', {'name': 'Model Town'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(Area.objects.filter(name='Model Town').exists())
+
+    def test_duplicate_area_rejected_case_insensitively(self):
+        """'johar town' and 'Johar Town' are the same place in a dropdown."""
+        self.client.force_authenticate(self.admin)
+        res = self.client.post('/api/auth/admin/areas/', {'name': 'johar town'}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_blank_area_name_rejected(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.post('/api/auth/admin/areas/', {'name': '   '}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_customer_cannot_manage_areas(self):
+        self.client.force_authenticate(self.customer)
+        self.assertEqual(self.client.get('/api/auth/admin/areas/').status_code, 403)
+        self.assertEqual(
+            self.client.post('/api/auth/admin/areas/', {'name': 'X'}, format='json').status_code,
+            403,
+        )
+
+    def test_signup_accepts_an_area_outside_the_list(self):
+        """The list is a suggestion, not a constraint."""
+        res = self.client.post('/api/auth/register/', {
+            'username': 'customarea', 'email': 'custom@example.com',
+            'password': 'Password123!', 'password_confirm': 'Password123!',
+            'phone_number': '03001234567', 'house_number': 'H-9',
+            'area': 'Somewhere Not Listed',
+        })
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        profile = User.objects.get(username='customarea').profile
+        self.assertEqual(profile.area, 'Somewhere Not Listed')
+
+    def test_block_is_optional_but_area_is_not(self):
+        base = {
+            'username': 'noblock', 'email': 'noblock@example.com',
+            'password': 'Password123!', 'password_confirm': 'Password123!',
+            'phone_number': '03001234567', 'house_number': 'H-9',
+        }
+        res = self.client.post('/api/auth/register/', {**base, 'area': 'Johar Town'})
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(User.objects.get(username='noblock').profile.address,
+                         'H-9, Johar Town')

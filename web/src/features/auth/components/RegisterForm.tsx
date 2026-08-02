@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { UserPlus } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Button, Input, useToast } from "@/components/ui";
+import { cn } from "@/lib/cn";
+import { areasApi } from "@/lib/api/areas";
+import type { Area } from "@/lib/types";
 import { AuthShell } from "./AuthShell";
 import { GoogleDivider, GoogleSignInButton } from "./GoogleSignInButton";
 
@@ -19,7 +22,8 @@ const EMPTY = {
   phone_number: "",
   house_number: "",
   portion: "",
-  block_area: "",
+  block: "",
+  area: "",
 };
 
 // Pakistani mobile numbers: 03xx-xxxxxxx, +923xxxxxxxxx or 923xxxxxxxxx
@@ -34,6 +38,14 @@ export function RegisterForm() {
   const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [customArea, setCustomArea] = useState(false);
+
+  // Admin-defined localities. Public endpoint — signup precedes any login.
+  // A failure is non-fatal: the field falls back to free text.
+  useEffect(() => {
+    areasApi.list().then(setAreas).catch(() => setCustomArea(true));
+  }, []);
 
   const set =
     (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -153,31 +165,79 @@ export function RegisterForm() {
           required
         />
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        {/* House / Portion / Block on one row — short values that belong
+            together, and it keeps the form from running long. */}
+        <div className="grid gap-4 sm:grid-cols-3">
           <Input
             label="House number"
             value={form.house_number}
             onChange={set("house_number")}
-            placeholder="e.g. H-12 or 45-A"
+            placeholder="H-12"
             maxLength={50}
             required
           />
           <Input
-            label="Portion (optional)"
+            label="Portion"
             value={form.portion}
             onChange={set("portion")}
-            placeholder="e.g. Ground Floor"
+            placeholder="Ground"
             maxLength={50}
           />
+          <Input
+            label="Block"
+            value={form.block}
+            onChange={set("block")}
+            placeholder="Block 6"
+            maxLength={100}
+          />
         </div>
-        <Input
-          label="Block / Area"
-          value={form.block_area}
-          onChange={set("block_area")}
-          placeholder="e.g. Block 6, Gulshan-e-Iqbal"
-          maxLength={150}
-          required
-        />
+
+        <div>
+          <label className="label">
+            Area <span className="text-rose-400">*</span>
+          </label>
+          {areas.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {areas.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => { setForm((f) => ({ ...f, area: a.name })); setCustomArea(false); }}
+                  className={cn(
+                    "rounded-full border px-3.5 py-1.5 text-sm transition",
+                    form.area === a.name && !customArea
+                      ? "border-wave bg-wave/20 text-wave"
+                      : "border-white/10 text-mist/60 hover:text-mist"
+                  )}
+                >
+                  {a.name}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => { setCustomArea(true); setForm((f) => ({ ...f, area: "" })); }}
+                className={cn(
+                  "rounded-full border px-3.5 py-1.5 text-sm transition",
+                  customArea
+                    ? "border-wave bg-wave/20 text-wave"
+                    : "border-white/10 text-mist/60 hover:text-mist"
+                )}
+              >
+                Other…
+              </button>
+            </div>
+          )}
+          {(customArea || areas.length === 0) && (
+            <input
+              className="input w-full"
+              value={form.area}
+              onChange={set("area")}
+              placeholder="Type your area"
+              maxLength={150}
+              required
+            />
+          )}
+        </div>
         <p className="text-xs text-mist/50">
           We use this as your default delivery address.
         </p>
