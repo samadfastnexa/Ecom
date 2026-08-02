@@ -1,5 +1,7 @@
 import { Product } from './product';
 
+export type StaffRoleFilter = 'all' | 'riders' | 'staff';
+
 export type MainTabParamList = {
   Home: undefined;
   Orders: undefined;
@@ -27,10 +29,13 @@ export type RootStackParamList = {
   DeliveryOrderDetail: { order: any };
   AdminOrderDetail: { order: any; deliveryBoys: any[] };
   AdminCreateOrder: undefined;
-  AdminStaff: undefined;
+  /** `role` preselects the list filter — e.g. deep-link straight to riders. */
+  AdminStaff: { role?: StaffRoleFilter } | undefined;
   AdminSettings: undefined;
   AdminActivity: undefined;
   AdminNotification: undefined;
   AdminPlant: undefined;
   AdminShop: undefined;
+  /** Opens straight to a customer's statement when a customer is supplied. */
+  AdminLedger: { customerId?: number; customerName?: string } | undefined;
 };

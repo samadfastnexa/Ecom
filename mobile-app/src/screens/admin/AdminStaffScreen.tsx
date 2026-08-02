@@ -4,9 +4,17 @@ import {
   TextInput, ActivityIndicator, RefreshControl, Modal, ScrollView,
   Switch, Alert,
 } from 'react-native';
+import { useRoute, RouteProp } from '@react-navigation/native';
 import { LoadingScreen } from '../../components/LoadingScreen';
 import { Ionicons } from '@expo/vector-icons';
 import { adminService, AdminStaff } from '../../services/adminService';
+import { RootStackParamList, StaffRoleFilter } from '../../types/navigation';
+
+const ROLE_TABS: { key: StaffRoleFilter; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'riders', label: 'Riders' },
+  { key: 'staff', label: 'Staff' },
+];
 
 const STATUS_COLORS: Record<string, string> = {
   Active: '#34C759',
@@ -32,6 +40,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center',
   },
   countText: { fontSize: 12, color: '#999', paddingHorizontal: 16, paddingVertical: 6 },
+  roleTabs: {
+    flexDirection: 'row', gap: 8,
+    paddingHorizontal: 16, paddingTop: 10,
+    backgroundColor: 'white',
+  },
+  roleTab: {
+    flex: 1, paddingVertical: 7, borderRadius: 10,
+    borderWidth: 1, borderColor: '#e4e6ea',
+    alignItems: 'center', backgroundColor: 'white',
+  },
+  roleTabActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  roleTabText: { fontSize: 13, fontWeight: '600', color: '#666' },
+  roleTabTextActive: { color: 'white' },
   row: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'white', paddingHorizontal: 16, paddingVertical: 12, gap: 12,
@@ -669,10 +690,12 @@ function StaffDetailModal({
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export const AdminStaffScreen: React.FC = () => {
+  const route = useRoute<RouteProp<RootStackParamList, 'AdminStaff'>>();
   const [staff, setStaff] = useState<AdminStaff[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
+  const [role, setRole] = useState<StaffRoleFilter>(route.params?.role ?? 'all');
   const [selected, setSelected] = useState<AdminStaff | null>(null);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -685,14 +708,20 @@ export const AdminStaffScreen: React.FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  const byRole = role === 'all'
+    ? staff
+    : staff.filter(s => (role === 'riders' ? s.is_rider : !s.is_rider));
+
   const filtered = search
-    ? staff.filter(s => {
+    ? byRole.filter(s => {
         const name = s.full_name.toLowerCase();
         const q = search.toLowerCase();
         return name.includes(q) || s.username.toLowerCase().includes(q) ||
           (s.phone_number && s.phone_number.includes(q));
       })
-    : staff;
+    : byRole;
+
+  const noun = role === 'riders' ? 'riders' : role === 'staff' ? 'staff members' : 'staff & riders';
 
   const renderItem = ({ item }: { item: AdminStaff }) => {
     const fullName = item.full_name || item.username;
@@ -745,7 +774,24 @@ export const AdminStaffScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.countText}>{filtered.length} staff members</Text>
+      <View style={styles.roleTabs}>
+        {ROLE_TABS.map(tab => {
+          const active = role === tab.key;
+          return (
+            <TouchableOpacity
+              key={tab.key}
+              style={[styles.roleTab, active && styles.roleTabActive]}
+              onPress={() => setRole(tab.key)}
+            >
+              <Text style={[styles.roleTabText, active && styles.roleTabTextActive]}>
+                {tab.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      <Text style={styles.countText}>{filtered.length} {noun}</Text>
 
       {loading ? (
         <LoadingScreen message="Loading staff…" />
@@ -760,8 +806,8 @@ export const AdminStaffScreen: React.FC = () => {
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           ListEmptyComponent={
             <View style={styles.center}>
-              <Ionicons name="people-outline" size={48} color="#ccc" />
-              <Text style={styles.emptyText}>No staff found</Text>
+              <Ionicons name={role === 'riders' ? 'bicycle-outline' : 'people-outline'} size={48} color="#ccc" />
+              <Text style={styles.emptyText}>No {noun} found</Text>
             </View>
           }
           contentContainerStyle={filtered.length === 0 ? { flex: 1 } : { paddingBottom: 24 }}

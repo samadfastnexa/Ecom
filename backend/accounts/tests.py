@@ -92,3 +92,186 @@ class AuthenticationTests(TestCase):
         response = self.client.post(self.register_url, self.user_data)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('email', response.data)
+
+
+class AdminResetPasswordTests(TestCase):
+    """Admin-initiated password resets for riders / staff."""
+
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            username='admin1', password='AdminPass1!', is_staff=True
+        )
+        self.rider = User.objects.create_user(
+            username='rider1', password='OldRiderPass1!'
+        )
+        self.rider.profile.user_type = 'delivery_boy'
+        self.rider.profile.is_rider = True
+        self.rider.profile.save()
+        self.url = f'/api/auth/admin/reset-password/{self.rider.id}/'
+
+    def test_admin_sets_explicit_password(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(self.url, {'new_password': 'BrandNewPass9!'})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Not echoed back when the admin chose it themselves.
+        self.assertIsNone(response.data['new_password'])
+        self.rider.refresh_from_db()
+        self.assertTrue(self.rider.check_password('BrandNewPass9!'))
+
+    def test_admin_generates_temporary_password(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(self.url, {'generate': True})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        generated = response.data['new_password']
+        self.assertEqual(len(generated), 10)
+        self.rider.refresh_from_db()
+        self.assertTrue(self.rider.check_password(generated))
+
+    def test_short_password_rejected(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(self.url, {'new_password': 'abc'})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.rider.refresh_from_db()
+        self.assertTrue(self.rider.check_password('OldRiderPass1!'))
+
+    def test_non_staff_cannot_reset(self):
+        customer = User.objects.create_user(username='cust1', password='CustPass1!')
+        self.client.force_authenticate(customer)
+        response = self.client.post(self.url, {'new_password': 'Hijacked123!'})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.rider.refresh_from_db()
+        self.assertTrue(self.rider.check_password('OldRiderPass1!'))
+
+    def test_anonymous_cannot_reset(self):
+        response = self.client.post(self.url, {'new_password': 'Hijacked123!'})
+        self.assertIn(
+            response.status_code,
+            (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN),
+        )
+        self.rider.refresh_from_db()
+        self.assertTrue(self.rider.check_password('OldRiderPass1!'))
+
+    def test_staff_cannot_reset_superuser_password(self):
+        root = User.objects.create_superuser(
+            username='root', email='root@example.com', password='RootPass1!'
+        )
+        self.client.force_authenticate(self.admin)
+        response = self.client.post(
+            f'/api/auth/admin/reset-password/{root.id}/', {'generate': True}
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        root.refresh_from_db()
+        self.assertTrue(root.check_password('RootPass1!'))
+
+    def test_superuser_can_reset_superuser_password(self):
+        root = User.objects.create_superuser(
+            username='root2', email='root2@example.com', password='RootPass1!'
+        )
+        self.client.force_authenticate(root)
+        response = self.client.post(
+            f'/api/auth/admin/reset-password/{root.id}/', {'new_password': 'FreshRoot1!'}
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        root.refresh_from_db()
+        self.assertTrue(root.check_password('FreshRoot1!'))
+
+
+class GoogleAuthTests(TestCase):
+    """Google sign-in: audience, email verification and account-state checks."""
+
+    URL = '/api/auth/google/'
+    OUR_CLIENT = 'ours.apps.googleusercontent.com'
+
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+
+    def _patch_google(self, userinfo, tokeninfo=None, userinfo_ok=True, tokeninfo_ok=True):
+        """Stub the two Google endpoints GoogleAuthView calls."""
+        def fake_get(url, **kwargs):
+            resp = mock.Mock()
+            if 'tokeninfo' in url:
+                resp.ok = tokeninfo_ok
+                resp.json.return_value = tokeninfo or {'aud': self.OUR_CLIENT}
+            else:
+                resp.ok = userinfo_ok
+                resp.json.return_value = userinfo
+            return resp
+        return mock.patch('requests.get', side_effect=fake_get)
+
+    @override_settings(GOOGLE_ALLOWED_CLIENT_IDS=[OUR_CLIENT])
+    def test_creates_customer_for_new_verified_email(self):
+        userinfo = {'email': 'New.User@example.com', 'email_verified': True,
+                    'given_name': 'New', 'family_name': 'User'}
+        with self._patch_google(userinfo):
+            response = self.client.post(self.URL, {'access_token': 'tok'}, format='json')
+        self.assertEqual(response.status_code, http_status.HTTP_200_OK)
+        self.assertIn('access', response.data)
+        user = User.objects.get(email='new.user@example.com')
+        self.assertEqual(user.profile.user_type, 'customer')
+        self.assertFalse(user.has_usable_password())
+
+    @override_settings(GOOGLE_ALLOWED_CLIENT_IDS=[OUR_CLIENT])
+    def test_rejects_token_issued_to_another_app(self):
+        userinfo = {'email': 'victim@example.com', 'email_verified': True}
+        with self._patch_google(userinfo, tokeninfo={'aud': 'someone-else.apps.googleusercontent.com'}):
+            response = self.client.post(self.URL, {'access_token': 'stolen'}, format='json')
+        self.assertEqual(response.status_code, http_status.HTTP_401_UNAUTHORIZED)
+        self.assertFalse(User.objects.filter(email='victim@example.com').exists())
+
+    @override_settings(GOOGLE_ALLOWED_CLIENT_IDS=[OUR_CLIENT])
+    def test_accepts_azp_when_aud_differs(self):
+        userinfo = {'email': 'azp@example.com', 'email_verified': True}
+        with self._patch_google(userinfo, tokeninfo={'aud': 'other', 'azp': self.OUR_CLIENT}):
+            response = self.client.post(self.URL, {'access_token': 'tok'}, format='json')
+        self.assertEqual(response.status_code, http_status.HTTP_200_OK)
+
+    @override_settings(GOOGLE_ALLOWED_CLIENT_IDS=[OUR_CLIENT])
+    def test_rejects_unverified_email(self):
+        """Otherwise an unverified address could hijack an existing account."""
+        existing = User.objects.create_user(
+            username='realowner', email='owner@example.com', password='RealPass1!'
+        )
+        userinfo = {'email': 'owner@example.com', 'email_verified': False}
+        with self._patch_google(userinfo):
+            response = self.client.post(self.URL, {'access_token': 'tok'}, format='json')
+        self.assertEqual(response.status_code, http_status.HTTP_403_FORBIDDEN)
+        self.assertNotIn('access', response.data)
+        existing.refresh_from_db()
+        self.assertTrue(existing.check_password('RealPass1!'))
+
+    @override_settings(GOOGLE_ALLOWED_CLIENT_IDS=[OUR_CLIENT])
+    def test_rejects_disabled_account(self):
+        User.objects.create_user(
+            username='banned', email='banned@example.com',
+            password='Pass1234!', is_active=False,
+        )
+        userinfo = {'email': 'banned@example.com', 'email_verified': True}
+        with self._patch_google(userinfo):
+            response = self.client.post(self.URL, {'access_token': 'tok'}, format='json')
+        self.assertEqual(response.status_code, http_status.HTTP_403_FORBIDDEN)
+
+    @override_settings(GOOGLE_ALLOWED_CLIENT_IDS=[OUR_CLIENT])
+    def test_signs_in_existing_user_without_duplicating(self):
+        User.objects.create_user(
+            username='existing', email='existing@example.com', password='Pass1234!'
+        )
+        userinfo = {'email': 'existing@example.com', 'email_verified': True}
+        with self._patch_google(userinfo):
+            response = self.client.post(self.URL, {'access_token': 'tok'}, format='json')
+        self.assertEqual(response.status_code, http_status.HTTP_200_OK)
+        self.assertEqual(User.objects.filter(email='existing@example.com').count(), 1)
+
+    @override_settings(GOOGLE_ALLOWED_CLIENT_IDS=[])
+    def test_audience_check_skipped_when_unconfigured(self):
+        """Local dev convenience — documented as unsafe for deployment."""
+        userinfo = {'email': 'dev@example.com', 'email_verified': True}
+        with self._patch_google(userinfo, tokeninfo={'aud': 'anything'}):
+            response = self.client.post(self.URL, {'access_token': 'tok'}, format='json')
+        self.assertEqual(response.status_code, http_status.HTTP_200_OK)
+
+    def test_missing_token_rejected(self):
+        response = self.client.post(self.URL, {}, format='json')
+        self.assertEqual(response.status_code, http_status.HTTP_400_BAD_REQUEST)

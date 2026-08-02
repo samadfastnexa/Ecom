@@ -10,6 +10,7 @@ import { formatPrice } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { ridersApi } from "@/lib/api/riders";
 import { Button, Input, Modal, Skeleton, useToast } from "@/components/ui";
+import { PasswordResetPanel } from "@/components/admin/PasswordResetPanel";
 import { useRiderHistory } from "../hooks/useRiders";
 
 // ─── History table ─────────────────────────────────────────────────────────────
@@ -169,7 +170,13 @@ function ProfileInfo({ rider, onUpdated }: { rider: RiderProfile; onUpdated: (r:
 
 // ─── Main modal ────────────────────────────────────────────────────────────────
 
-type Tab = "profile" | "history";
+type Tab = "profile" | "history" | "security";
+
+const TAB_LABELS: Record<Tab, string> = {
+  profile: "Profile",
+  history: "Delivery History",
+  security: "Password",
+};
 
 interface RiderDetailModalProps {
   rider: RiderProfile | null;
@@ -212,25 +219,25 @@ export function RiderDetailModal({ rider, onClose, onUpdated }: RiderDetailModal
 
       {/* Tabs */}
       <div className="mb-4 flex gap-1 rounded-xl border border-white/10 bg-white/5 p-1">
-        {(["profile", "history"] as Tab[]).map((t) => (
+        {(["profile", "history", "security"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={cn(
-              "flex-1 rounded-lg py-2 text-sm font-medium capitalize transition",
+              "flex-1 rounded-lg py-2 text-sm font-medium transition",
               tab === t ? "bg-wave/20 text-wave" : "text-mist/60 hover:text-mist"
             )}
           >
-            {t === "profile" ? "Profile" : "Delivery History"}
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>
 
       <div className="max-h-[50vh] overflow-y-auto pr-1">
-        {tab === "profile" ? (
-          <ProfileInfo rider={rider} onUpdated={onUpdated} />
-        ) : (
-          <HistoryTable orders={history.data} loading={history.loading} />
+        {tab === "profile" && <ProfileInfo rider={rider} onUpdated={onUpdated} />}
+        {tab === "history" && <HistoryTable orders={history.data} loading={history.loading} />}
+        {tab === "security" && (
+          <PasswordResetPanel userId={rider.user_id} displayName={rider.full_name} />
         )}
       </div>
     </Modal>

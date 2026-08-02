@@ -11,6 +11,7 @@ import { formatPrice } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { staffApi } from "@/lib/api/staff";
 import { Button, Input, Modal, Skeleton, useToast } from "@/components/ui";
+import { PasswordResetPanel } from "@/components/admin/PasswordResetPanel";
 import { useStaffHistory } from "../hooks/useStaff";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -449,7 +450,7 @@ function ProfileTab({ staff, onUpdated }: { staff: StaffProfile; onUpdated: (s: 
 
 // ─── Main modal ────────────────────────────────────────────────────────────────
 
-type Tab = "profile" | "documents" | "history";
+type Tab = "profile" | "documents" | "history" | "security";
 
 interface StaffDetailModalProps {
   staff: StaffProfile | null;
@@ -467,6 +468,7 @@ export function StaffDetailModal({ staff, onClose, onUpdated }: StaffDetailModal
     { key: "profile", label: "Profile", show: true },
     { key: "documents", label: "Documents", show: true },
     { key: "history", label: "Deliveries", show: staff.is_rider },
+    { key: "security", label: "Password", show: true },
   ];
 
   const deliveryRate = (staff.total_deliveries ?? 0) > 0
@@ -543,6 +545,9 @@ export function StaffDetailModal({ staff, onClose, onUpdated }: StaffDetailModal
         {tab === "profile" && <ProfileTab staff={staff} onUpdated={onUpdated} />}
         {tab === "documents" && <DocumentsTab staff={staff} onUpdated={onUpdated} />}
         {tab === "history" && <HistoryTable orders={history.data} loading={history.loading} />}
+        {tab === "security" && (
+          <PasswordResetPanel userId={staff.user_id} displayName={staff.full_name} />
+        )}
       </div>
     </Modal>
   );

@@ -327,6 +327,14 @@ class AdminResetPasswordView(APIView):
         import secrets
         import string
         user = get_object_or_404(User, pk=user_id)
+
+        # Without this, any is_staff account could take over a superuser's login.
+        if user.is_superuser and not request.user.is_superuser:
+            return Response(
+                {'detail': 'Only a superuser can reset a superuser password.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         generate = request.data.get('generate', False)
         new_password = (request.data.get('new_password') or '').strip()
 
