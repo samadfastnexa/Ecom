@@ -29,10 +29,40 @@ interface User {
   remarks?: string;
 }
 
+/**
+ * Error thrown by `register` carrying DRF's per-field validation messages
+ * (e.g. { username: 'A user with that username already exists.' }) so the
+ * form can show each message against the field that caused it.
+ */
+export interface AuthError extends Error {
+  fieldErrors?: Record<string, string>;
+}
+
+/** Flatten a DRF error body into { field: 'first message' }. */
+const parseFieldErrors = (raw: string): Record<string, string> | undefined => {
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
+
+  const result: Record<string, string> = {};
+  Object.entries(data as Record<string, unknown>).forEach(([field, value]) => {
+    const message = Array.isArray(value) ? value[0] : value;
+    if (message != null) result[field] = String(message);
+  });
+  return Object.keys(result).length ? result : undefined;
+};
+
 interface AuthContextType {
   user: User | null;
   token: string | null;
+  /** True only while an auth request is in flight — drives inline button spinners. */
   isLoading: boolean;
+  /** True only during the initial session restore — drives the splash screen. */
+  isBootstrapping: boolean;
   login: (credentials: any) => Promise<void>;
   loginWithGoogle: (googleAccessToken: string) => Promise<void>;
   register: (userData: any) => Promise<void>;
@@ -44,7 +74,8 @@ interface AuthContextType {
 export const AuthContext = createContext<AuthContextType>({
   user: null,
   token: null,
-  isLoading: true,
+  isLoading: false,
+  isBootstrapping: true,
   login: async () => {},
   loginWithGoogle: async () => {},
   register: async () => {},
@@ -57,7 +88,11 @@ export const AuthContext = createContext<AuthContextType>({
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // Kept separate on purpose: `isBootstrapping` swaps the whole navigator for the
+  // splash screen, so an in-flight login/register must NOT use it — doing so
+  // unmounts the auth screens and wipes everything the user typed.
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -84,7 +119,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch (e) {
       console.error('Failed to load auth data', e);
     } finally {
-      setIsLoading(false);
+      setIsBootstrapping(false);
     }
   };
 
@@ -141,17 +176,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         password: userData.password
       });
     } catch (e: any) {
-      let message = 'Registration failed';
-       try {
-        const errorData = JSON.parse(e.message);
-        // Handle validation errors (array or string)
-        const firstError = Object.values(errorData)[0];
-        message = Array.isArray(firstError) ? firstError[0] : (firstError as string) || message;
-      } catch {
-        message = e.message;
-      }
-      setError(message as string);
-      throw new Error(message as string);
+      const fieldErrors = parseFieldErrors(e.message);
+      const message = fieldErrors
+        ? Object.values(fieldErrors)[0]
+        : e.message || 'Registration failed';
+      setError(message);
+      const authError: AuthError = new Error(message);
+      authError.fieldErrors = fieldErrors;
+      throw authError;
     } finally {
       setIsLoading(false);
     }
@@ -221,7 +253,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, loginWithGoogle, register, updateProfile, logout, error }}>
+    <AuthContext.Provider value={{ user, token, isLoading, isBootstrapping, login, loginWithGoogle, register, updateProfile, logout, error }}>
       {children}
     </AuthContext.Provider>
   );

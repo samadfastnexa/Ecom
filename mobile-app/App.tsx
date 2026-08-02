@@ -206,11 +206,14 @@ const AdminTabs = () => (
 // ─── App content ──────────────────────────────────────────────────────────────
 
 const AppContent = () => {
-  const { user, isLoading } = useContext(AuthContext);
+  const { user, isBootstrapping } = useContext(AuthContext);
   const isDeliveryBoy = user?.user_type === 'delivery_boy';
   const isAdmin = user?.is_staff === true;
 
-  if (isLoading) return <SplashScreen />;
+  // Only the initial session restore may swap out the navigator. Showing the
+  // splash for an in-flight login/register would unmount the auth screens and
+  // discard whatever the user had typed.
+  if (isBootstrapping) return <SplashScreen />;
 
   return (
     <NavigationContainer>
