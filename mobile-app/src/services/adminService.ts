@@ -558,4 +558,142 @@ export const adminService = {
   deleteCategory(id: number): Promise<void> {
     return adminFetch(`/categories/${id}/`, { method: 'DELETE' });
   },
+
+  // ── Customer ledger ────────────────────────────────────────────────────────
+  // Note every `balance` here is owed-positive: a positive number means the
+  // customer owes money. That is the opposite of the stored account_balance,
+  // and matches the printed statement.
+
+  getReceivables(params: { search?: string; only_owing?: boolean } = {}):
+    Promise<{ count: number; results: Receivable[] }> {
+    const qs = new URLSearchParams();
+    if (params.search) qs.set('search', params.search);
+    if (params.only_owing) qs.set('only_owing', 'true');
+    const query = qs.toString();
+    return adminFetch(`/ledger/customers/${query ? `?${query}` : ''}`);
+  },
+
+  getStatement(
+    userId: number,
+    params: { start?: string; end?: string; source?: string } = {},
+  ): Promise<LedgerStatement> {
+    const qs = new URLSearchParams();
+    if (params.start) qs.set('start', params.start);
+    if (params.end) qs.set('end', params.end);
+    if (params.source) qs.set('source', params.source);
+    const query = qs.toString();
+    return adminFetch(`/ledger/customers/${userId}/statement/${query ? `?${query}` : ''}`);
+  },
+
+  getLedgerSummary(userId: number): Promise<LedgerSummary> {
+    return adminFetch(`/ledger/customers/${userId}/summary/`);
+  },
+
+  recordPayment(data: {
+    customer_id: number;
+    amount: string;
+    payment_method?: string;
+    entry_date?: string;
+    reference?: string;
+    notes?: string;
+  }): Promise<LedgerEntry> {
+    return adminFetch('/ledger/payments/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  voidLedgerEntry(entryId: number, reason: string): Promise<LedgerEntry> {
+    return adminFetch(`/ledger/entries/${entryId}/void/`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  },
 };
+
+// ── Ledger types ─────────────────────────────────────────────────────────────
+
+export interface Receivable {
+  id: number;
+  username: string;
+  name: string;
+  customer_code: string | null;
+  phone: string | null;
+  address: string | null;
+  balance: string;
+  bottles_held: number;
+  last_entry_date: string | null;
+  last_payment_date: string | null;
+}
+
+export interface LedgerEntry {
+  id: number;
+  entry_date: string;
+  entry_type: string;
+  entry_type_display: string;
+  description: string;
+  item_label: string;
+  quantity: string | null;
+  unit_price: string | null;
+  document_number: string;
+  document_label: string;
+  amount: string;
+  debit: string | null;
+  credit: string | null;
+  /** Only present on statement rows; recomputed and owed-positive. */
+  running_balance?: string;
+  /** Frozen snapshot at insert time, stored credit-positive. Negate for "owed". */
+  balance_after: string | null;
+  bottles_out: number;
+  bottles_in: number;
+  stock_after?: number;
+  payment_method: string;
+  reference: string;
+  receipt_number: string | null;
+  source: 'shop' | 'plant' | 'manual';
+  is_reversal: boolean;
+  is_reversed: boolean;
+  can_void: boolean;
+  created_by_name: string | null;
+  created_at: string;
+}
+
+export interface LedgerStatement {
+  customer: {
+    id: number;
+    name: string;
+    username: string;
+    customer_code: string | null;
+    phone: string | null;
+    address: string | null;
+  };
+  period: { start: string | null; end: string | null };
+  opening_balance: string;
+  closing_balance: string;
+  opening_stock: number;
+  closing_stock: number;
+  totals: {
+    debit: string;
+    credit: string;
+    quantity: string;
+    bottles_out: number;
+    bottles_in: number;
+  };
+  count: number;
+  results: LedgerEntry[];
+}
+
+export interface LedgerSummary {
+  customer_id: number;
+  customer_name: string;
+  customer_code: string | null;
+  phone: string | null;
+  address: string | null;
+  balance: string;
+  bottles_held: number;
+  total_charged: string;
+  total_paid: string;
+  entry_count: number;
+  last_entry_date: string | null;
+  last_payment: { date: string; amount: string; receipt_number: string | null } | null;
+}

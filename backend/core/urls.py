@@ -28,6 +28,7 @@ urlpatterns = [
     path('api/localization/', include('localization.urls')),
     path('api/plant/', include('plant.urls')),
     path('api/activities/', include('activities.urls')),
+    path('api/ledger/', include('ledger.urls')),
 ]
 
 # Serve user-uploaded media (product/complaint images). On shared hosting there

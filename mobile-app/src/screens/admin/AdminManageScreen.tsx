@@ -46,7 +46,25 @@ export const AdminManageScreen: React.FC = () => {
           color="#5856D6"
           label="Staff Management"
           description="View, add, and update staff & riders"
-          onPress={() => navigation.navigate('AdminStaff')}
+          onPress={() => navigation.navigate('AdminStaff', { role: 'all' })}
+        />
+        <MenuItem
+          icon="bicycle"
+          color="#32ADE6"
+          label="Riders"
+          description="Delivery riders — profiles and password resets"
+          onPress={() => navigation.navigate('AdminStaff', { role: 'riders' })}
+        />
+      </View>
+
+      <SectionHeader title="MONEY" />
+      <View style={styles.card}>
+        <MenuItem
+          icon="wallet"
+          color="#FF3B30"
+          label="Customer Ledger"
+          description="Balances, statements, payments & receipts"
+          onPress={() => navigation.navigate('AdminLedger')}
         />
       </View>
 

@@ -57,7 +57,7 @@ class DeliveryRecordSerializer(serializers.ModelSerializer):
             'id', 'date', 'customer_id', 'customer_name',
             'customer_type_id', 'customer_type_name',
             'bottle_type_id', 'bottle_type_name', 'house',
-            'bottles', 'unit_price', 'amount',
+            'bottles', 'unit_price', 'amount', 'empties_collected',
             'paid', 'paid_amount', 'pending', 'payment_status',
             'notes', 'created_at',
         ]

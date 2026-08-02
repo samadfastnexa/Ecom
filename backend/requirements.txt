@@ -23,6 +23,12 @@ requests==2.32.5
 # Excel export (plant management)
 openpyxl==3.1.5
 
+# PDF generation (ledger statements + payment receipts).
+# ReportLab is pure Python with prebuilt wheels — WeasyPrint was ruled out
+# because it needs Cairo/Pango system libraries that cPanel shared hosting
+# cannot install.
+reportlab==4.2.5
+
 # PostgreSQL driver (local dev)
 psycopg2-binary==2.9.12
 

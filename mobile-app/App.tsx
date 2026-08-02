@@ -32,6 +32,7 @@ import { AdminSettingsScreen } from './src/screens/admin/AdminSettingsScreen';
 import { AdminActivityScreen } from './src/screens/admin/AdminActivityScreen';
 import { AdminNotificationScreen } from './src/screens/admin/AdminNotificationScreen';
 import { AdminPlantScreen } from './src/screens/admin/AdminPlantScreen';
+import { AdminLedgerScreen } from './src/screens/admin/AdminLedgerScreen';
 import { AdminShopScreen } from './src/screens/admin/AdminShopScreen';
 
 import { RootStackParamList, MainTabParamList, AdminTabParamList } from './src/types/navigation';
@@ -255,6 +256,7 @@ const AppContent = () => {
                 <Stack.Screen name="AdminActivity"      component={AdminActivityScreen}      options={{ headerTitle: 'Activity Log' }} />
                 <Stack.Screen name="AdminNotification"  component={AdminNotificationScreen}  options={{ headerTitle: 'Notifications' }} />
                 <Stack.Screen name="AdminPlant"         component={AdminPlantScreen}         options={{ headerTitle: 'Plant / Deliveries' }} />
+                <Stack.Screen name="AdminLedger"        component={AdminLedgerScreen}        options={{ headerTitle: 'Customer Ledger' }} />
                 <Stack.Screen name="AdminShop"          component={AdminShopScreen}          options={{ headerTitle: 'Shop Management' }} />
               </>
             )}

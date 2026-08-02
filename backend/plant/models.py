@@ -87,6 +87,12 @@ class DeliveryRecord(models.Model):
         help_text="Auto-calculated: bottles × unit price",
     )
 
+    empties_collected = models.PositiveIntegerField(
+        default=0,
+        help_text="Empty bottles taken back on this visit. Usually equals the "
+                  "number delivered; the difference is what the customer still holds.",
+    )
+
     paid = models.BooleanField(default=False, help_text="True when fully paid")
     paid_amount = models.DecimalField(
         max_digits=12, decimal_places=2, default=0,

@@ -174,10 +174,14 @@ def create_user_profile(sender, instance, created, **kwargs):
         UserProfile.objects.create(user=instance)
 
 @receiver(post_save, sender=User)
-def save_user_profile(sender, instance, **kwargs):
-    if hasattr(instance, 'profile'):
-        instance.profile.save()
-    else:
+def save_user_profile(sender, instance, created, **kwargs):
+    # Deliberately does NOT full-save the profile. Doing so wrote back every
+    # column from a possibly-stale in-memory copy, which could silently revert
+    # a concurrently-updated account_balance. Every caller that changes profile
+    # fields saves the profile itself, so nothing relies on that behaviour.
+    if created:
+        return
+    if not hasattr(instance, 'profile'):
         UserProfile.objects.get_or_create(user=instance)
 
 

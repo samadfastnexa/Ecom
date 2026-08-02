@@ -6,6 +6,10 @@ import {
 import { LoadingScreen } from '../../components/LoadingScreen';
 import { Ionicons } from '@expo/vector-icons';
 import { adminService, AdminCustomer, CustomerStats } from '../../services/adminService';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../../types/navigation';
+import { balanceReminderMessage, canWhatsApp, openWhatsApp } from '../../utils/whatsapp';
 
 // ─── Styles (declared first so all components below can reference them) ───────
 
@@ -117,6 +121,14 @@ const modal = StyleSheet.create({
   },
   statValue: { fontSize: 20, fontWeight: '700', color: '#1a1a1a' },
   statLabel: { fontSize: 11, color: '#888', marginTop: 3, textAlign: 'center' },
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  actionBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 7, paddingVertical: 12, borderRadius: 10, borderWidth: 1,
+  },
+  ledgerBtn: { borderColor: '#007AFF40', backgroundColor: '#007AFF10' },
+  waBtn: { borderColor: '#25D36640', backgroundColor: '#25D36610' },
+  actionText: { fontSize: 14, fontWeight: '700' },
 });
 
 // ─── Add Customer Modal ───────────────────────────────────────────────────────
@@ -274,6 +286,7 @@ function CustomerStatsModal({
   onClose: () => void;
   onUpdated?: () => void;
 }) {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [stats, setStats] = useState<CustomerStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [phone, setPhone] = useState('');
@@ -414,6 +427,38 @@ function CustomerStatsModal({
                 </View>
               </View>
             ) : null}
+
+            {/* Ledger + WhatsApp actions */}
+            <View style={modal.actionRow}>
+              <TouchableOpacity
+                style={[modal.actionBtn, modal.ledgerBtn]}
+                onPress={() => {
+                  onClose();
+                  navigation.navigate('AdminLedger', {
+                    customerId: customer.id,
+                    customerName: customer.name || customer.username,
+                  });
+                }}
+              >
+                <Ionicons name="book-outline" size={17} color="#007AFF" />
+                <Text style={[modal.actionText, { color: '#007AFF' }]}>View Ledger</Text>
+              </TouchableOpacity>
+
+              {canWhatsApp(phone) && (
+                <TouchableOpacity
+                  style={[modal.actionBtn, modal.waBtn]}
+                  onPress={() => openWhatsApp(phone, balanceReminderMessage({
+                    customerName: customer.name || customer.username,
+                    // stats.account_balance is credit-positive; the reminder
+                    // wants the owed figure.
+                    balance: balanceNum === null ? 0 : -balanceNum,
+                  }))}
+                >
+                  <Ionicons name="logo-whatsapp" size={17} color="#25D366" />
+                  <Text style={[modal.actionText, { color: '#25D366' }]}>WhatsApp</Text>
+                </TouchableOpacity>
+              )}
+            </View>
 
             <View style={{ height: 16 }} />
           </ScrollView>

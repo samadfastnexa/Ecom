@@ -484,6 +484,145 @@ export type RiderProfile = StaffProfile;
 export type CreateRiderPayload = CreateStaffPayload;
 export type UpdateRiderPayload = UpdateStaffPayload;
 
+/* ---------- Customer ledger ---------- */
+
+export type LedgerEntryType =
+  | "opening"
+  | "order_charge"
+  | "order_payment"
+  | "plant_charge"
+  | "plant_payment"
+  | "payment"
+  | "adjustment"
+  | "refund";
+
+/** Cash only. */
+export type LedgerPaymentMethod = "Cash";
+
+export interface LedgerEntry {
+  id: number;
+  entry_date: string;
+  entry_type: LedgerEntryType;
+  entry_type_display: string;
+  description: string;
+  item_label: string;
+  quantity: string | null;
+  unit_price: string | null;
+  document_number: string;
+  document_label: string;
+  /** Stored sign: positive = credit to the customer. */
+  amount: string;
+  debit: string | null;
+  credit: string | null;
+  /** Statement rows only — recomputed, owed-positive. */
+  running_balance?: string;
+  /** Frozen at insert time, stored credit-positive. Negate for "owed". */
+  balance_after: string | null;
+  bottles_out: number;
+  bottles_in: number;
+  stock_after?: number;
+  payment_method: string;
+  reference: string;
+  receipt_number: string | null;
+  source: "shop" | "plant" | "manual";
+  is_reversal: boolean;
+  is_reversed: boolean;
+  can_void: boolean;
+  void_reason: string;
+  customer: number;
+  customer_name: string;
+  created_by_name: string | null;
+  created_at: string;
+  notes: string;
+}
+
+export interface LedgerStatement {
+  customer: {
+    id: number;
+    name: string;
+    username: string;
+    customer_code: string | null;
+    phone: string | null;
+    address: string | null;
+  };
+  period: { start: string | null; end: string | null };
+  /** All balances below are owed-positive. */
+  opening_balance: string;
+  closing_balance: string;
+  opening_stock: number;
+  closing_stock: number;
+  totals: {
+    debit: string;
+    credit: string;
+    quantity: string;
+    bottles_out: number;
+    bottles_in: number;
+  };
+  count: number;
+  limit: number;
+  offset: number;
+  results: LedgerEntry[];
+}
+
+export interface LedgerSummary {
+  customer_id: number;
+  customer_name: string;
+  customer_code: string | null;
+  phone: string | null;
+  address: string | null;
+  balance: string;
+  bottles_held: number;
+  total_charged: string;
+  total_paid: string;
+  entry_count: number;
+  last_entry_date: string | null;
+  last_payment: {
+    date: string;
+    amount: string;
+    receipt_number: string | null;
+  } | null;
+}
+
+export interface Receivable {
+  id: number;
+  username: string;
+  name: string;
+  customer_code: string | null;
+  phone: string | null;
+  address: string | null;
+  balance: string;
+  bottles_held: number;
+  last_entry_date: string | null;
+  last_payment_date: string | null;
+}
+
+export interface StatementFilters {
+  start?: string;
+  end?: string;
+  source?: "shop" | "plant" | "manual";
+  entry_type?: LedgerEntryType;
+}
+
+export interface RecordPaymentInput {
+  customer_id: number;
+  amount: string;
+  payment_method?: LedgerPaymentMethod;
+  entry_date?: string;
+  reference?: string;
+  notes?: string;
+}
+
+export interface ManualEntryInput {
+  customer_id: number;
+  entry_type: "opening" | "adjustment" | "refund";
+  amount: string;
+  description: string;
+  entry_date?: string;
+  bottles_out?: number;
+  bottles_in?: number;
+  notes?: string;
+}
+
 export interface AuthTokens {
   access: string;
   refresh: string;

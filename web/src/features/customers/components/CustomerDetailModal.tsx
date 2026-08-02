@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Phone, MapPin, Calendar, Package, Droplets, TrendingUp, Wallet, ShieldCheck, ShieldOff } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Phone, MapPin, Calendar, Package, Droplets, TrendingUp, Wallet, ShieldCheck, ShieldOff, BookOpen, MessageCircle } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { customersApi } from "@/lib/api";
+import { balanceReminderMessage, canWhatsApp, openWhatsApp } from "@/lib/whatsapp";
 import type { AdminCustomer, CustomerOrderStats } from "@/lib/types";
 
 interface Props {
@@ -27,6 +29,7 @@ function StatCard({ icon: Icon, label, value, color }: { icon: React.ElementType
 }
 
 export function CustomerDetailModal({ customer, onClose, onUpdated }: Props) {
+  const router = useRouter();
   const [stats, setStats] = useState<CustomerOrderStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
 
@@ -206,6 +209,30 @@ export function CustomerDetailModal({ customer, onClose, onUpdated }: Props) {
       ) : (
         <p className="text-center text-sm text-mist/30">No order data available.</p>
       )}
+
+      {/* Ledger + WhatsApp */}
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+        <Button
+          variant="ghost"
+          fullWidth
+          onClick={() => router.push(`/manage/ledger?customer=${customer.id}`)}
+        >
+          <BookOpen size={15} /> View ledger
+        </Button>
+        {canWhatsApp(customer.phone) && (
+          <Button
+            variant="ghost"
+            fullWidth
+            onClick={() => openWhatsApp(customer.phone, balanceReminderMessage({
+              customerName: customer.name || customer.username,
+              // stats.account_balance is credit-positive; the reminder wants owed.
+              balance: balanceNum === null ? 0 : -balanceNum,
+            }))}
+          >
+            <MessageCircle size={15} /> WhatsApp
+          </Button>
+        )}
+      </div>
     </Modal>
   );
 }

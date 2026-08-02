@@ -15,6 +15,7 @@ import {
   LifeBuoy,
   Factory,
   Bell,
+  BookOpen,
   Loader2,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { href: "/manage/orders", label: "Orders", icon: ClipboardList },
   { href: "/manage/shop", label: "Shop", icon: ShoppingBag },
   { href: "/manage/customers", label: "Customers", icon: Users },
+  { href: "/manage/ledger", label: "Ledger", icon: BookOpen },
   { href: "/manage/staff", label: "Staff", icon: UserCog },
   { href: "/manage/complaints", label: "Complaints", icon: LifeBuoy },
   { href: "/manage/notifications", label: "Notifications", icon: Bell },
