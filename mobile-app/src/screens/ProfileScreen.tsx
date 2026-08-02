@@ -11,6 +11,13 @@ import { RootStackParamList } from '../types/navigation';
 import { useLanguage } from '../context/LanguageContext';
 import { authService } from '../services/authService';
 import { API_URL } from '../constants/config';
+import { canWhatsApp, openWhatsApp } from '../utils/whatsapp';
+
+interface BusinessContact {
+  name: string;
+  phone: string | null;
+  address: string | null;
+}
 
 // ── Field config types ────────────────────────────────────────────────────────
 
@@ -77,8 +84,18 @@ export const ProfileScreen = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
+  const [business, setBusiness] = useState<BusinessContact | null>(null);
 
   const isStaff = user?.user_type === 'delivery_boy' || user?.user_type === 'staff';
+
+  // Business contact for the WhatsApp button. Served from the backend rather
+  // than baked into the build so the number can change without a new release.
+  useEffect(() => {
+    fetch(`${API_URL}/ledger/business/`)
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => data && setBusiness(data))
+      .catch(() => { /* the button simply stays hidden */ });
+  }, []);
 
   // Populate form from user
   useEffect(() => {
@@ -280,6 +297,21 @@ export const ProfileScreen = () => {
 
       {/* Actions */}
       <View style={styles.section}>
+        {canWhatsApp(business?.phone) && (
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => openWhatsApp(
+              business?.phone,
+              `Hello ${business?.name || 'Century Sip'}, I need help with my account.`,
+            )}
+          >
+            <Ionicons name="logo-whatsapp" size={24} color="#25D366" />
+            <Text style={styles.menuItemText}>
+              {t('contact_whatsapp', 'Contact us on WhatsApp')}
+            </Text>
+            <Ionicons name="chevron-forward" size={20} color="#ccc" />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.menuItem} onPress={() => navigation.navigate('Complaints')}>
           <Ionicons name="chatbubbles-outline" size={24} color="#333" />
           <Text style={styles.menuItemText}>{t('support_complaints', 'Support & Complaints')}</Text>
