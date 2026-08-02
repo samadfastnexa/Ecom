@@ -38,6 +38,35 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const LIMIT = 40;
 
+/** Local-date ISO string — toISOString() would shift by timezone. */
+const isoDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+type RangeKey = 'today' | 'week' | 'month' | 'all';
+
+const RANGES: { key: RangeKey; label: string }[] = [
+  { key: 'today', label: 'Today' },
+  { key: 'week', label: 'This Week' },
+  { key: 'month', label: 'This Month' },
+  { key: 'all', label: 'All' },
+];
+
+function rangeToDates(key: RangeKey): { from: string; to: string } {
+  const now = new Date();
+  const today = isoDate(now);
+  if (key === 'today') return { from: today, to: today };
+  if (key === 'week') {
+    const day = (now.getDay() + 6) % 7;   // week starts Monday
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - day);
+    return { from: isoDate(monday), to: today };
+  }
+  if (key === 'month') {
+    return { from: isoDate(new Date(now.getFullYear(), now.getMonth(), 1)), to: today };
+  }
+  return { from: '', to: '' };
+}
+
 const CATEGORIES = [
   { label: 'All', value: '' },
   { label: 'Orders', value: 'order' },
@@ -123,6 +152,7 @@ export const AdminActivityScreen: React.FC = () => {
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
 
+  const [range, setRange] = useState<RangeKey>('all');
   const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
@@ -141,6 +171,9 @@ export const AdminActivityScreen: React.FC = () => {
         const sp = new URLSearchParams({ limit: String(LIMIT), offset: String(off) });
         if (category) sp.set('category', category);
         if (search) sp.set('action', search);
+        const { from, to } = rangeToDates(range);
+        if (from) sp.set('date_from', from);
+        if (to) sp.set('date_to', to);
         const res = await fetch(`${API_URL}/activities/?${sp}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -161,13 +194,13 @@ export const AdminActivityScreen: React.FC = () => {
         setRefreshing(false);
       }
     },
-    [offset, hasMore, category, search],
+    [offset, hasMore, category, search, range],
   );
 
   useEffect(() => {
     load(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, search]);
+  }, [category, search, range]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -180,6 +213,24 @@ export const AdminActivityScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
+      {/* Quick date ranges — what an admin filters by most often */}
+      <View style={styles.rangeRow}>
+        {RANGES.map(r => {
+          const active = range === r.key;
+          return (
+            <TouchableOpacity
+              key={r.key}
+              style={[styles.rangeChip, active && styles.rangeChipActive]}
+              onPress={() => setRange(r.key)}
+            >
+              <Text style={[styles.rangeChipText, active && styles.rangeChipTextActive]}>
+                {r.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
       {/* Category chips */}
       <View style={styles.chips}>
         {CATEGORIES.map((c) => (
@@ -278,6 +329,19 @@ const styles = StyleSheet.create({
     borderColor: '#e0e0e0',
     backgroundColor: '#f5f5f5',
   },
+  rangeRow: {
+    flexDirection: 'row', gap: 8,
+    paddingHorizontal: 12, paddingTop: 10, paddingBottom: 2,
+    backgroundColor: 'white',
+  },
+  rangeChip: {
+    flex: 1, paddingVertical: 7, borderRadius: 10,
+    borderWidth: 1, borderColor: '#e4e6ea', backgroundColor: 'white',
+    alignItems: 'center',
+  },
+  rangeChipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  rangeChipText: { fontSize: 12, fontWeight: '600', color: '#666' },
+  rangeChipTextActive: { color: 'white' },
   chipText: { fontSize: 13, color: '#666' },
   searchRow: {
     flexDirection: 'row',

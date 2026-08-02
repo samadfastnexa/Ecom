@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
-  Activity, RefreshCw, Filter, ChevronLeft, ChevronRight,
-  Search, Calendar,
+  Activity, RefreshCw, Filter, Search, Calendar, Loader2,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api/client";
 import { Button, Card, Skeleton } from "@/components/ui";
+import { LoadingState } from "@/components/ui/LoadingState";
 import { cn } from "@/lib/cn";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -29,6 +29,38 @@ interface ActivityResponse {
 }
 
 // ─── Config ───────────────────────────────────────────────────────────────────
+
+/** Local-date ISO string — using toISOString() here would shift by timezone. */
+function isoDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+type RangeKey = "today" | "week" | "month" | "all";
+
+/** Presets the admin reaches for constantly; `all` clears the date filter. */
+const RANGES: { key: RangeKey; label: string }[] = [
+  { key: "today", label: "Today" },
+  { key: "week", label: "This Week" },
+  { key: "month", label: "This Month" },
+  { key: "all", label: "All Time" },
+];
+
+function rangeToDates(key: RangeKey): { from: string; to: string } {
+  const now = new Date();
+  const today = isoDate(now);
+  if (key === "today") return { from: today, to: today };
+  if (key === "week") {
+    // Week starts Monday — Sunday is 0, so shift it to the end.
+    const day = (now.getDay() + 6) % 7;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - day);
+    return { from: isoDate(monday), to: today };
+  }
+  if (key === "month") {
+    return { from: isoDate(new Date(now.getFullYear(), now.getMonth(), 1)), to: today };
+  }
+  return { from: "", to: "" };
+}
 
 const CATEGORY_COLORS: Record<string, string> = {
   order:    "bg-blue-400/15 text-blue-300",
@@ -92,16 +124,20 @@ export function ActivityLogPage() {
   const [entries, setEntries] = useState<ActivityLogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [offset, setOffset] = useState(0);
 
+  const [range, setRange] = useState<RangeKey>("all");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
   const [filterSearch, setFilterSearch] = useState("");
 
   const load = useCallback(
-    async (off: number) => {
-      setLoading(true);
+    async (off: number, { append = false }: { append?: boolean } = {}) => {
+      // Two separate flags so appending never blanks the rows already on screen.
+      if (append) setLoadingMore(true);
+      else setLoading(true);
       try {
         const sp = new URLSearchParams({ limit: String(LIMIT), offset: String(off) });
         if (filterCategory) sp.set("category", filterCategory);
@@ -109,13 +145,14 @@ export function ActivityLogPage() {
         if (filterDateTo) sp.set("date_to", filterDateTo);
         if (filterSearch) sp.set("action", filterSearch);
         const data = await apiFetch<ActivityResponse>(`/activities/?${sp}`, { auth: true });
-        setEntries(data.results);
+        setEntries((prev) => (append ? [...prev, ...data.results] : data.results));
         setTotal(data.count);
         setOffset(off);
       } catch (e) {
         console.error(e);
       } finally {
         setLoading(false);
+        setLoadingMore(false);
       }
     },
     [filterCategory, filterDateFrom, filterDateTo, filterSearch],
@@ -126,8 +163,28 @@ export function ActivityLogPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterCategory, filterDateFrom, filterDateTo]);
 
-  const pages = Math.ceil(total / LIMIT);
-  const currentPage = Math.floor(offset / LIMIT) + 1;
+  const hasMore = entries.length < total;
+
+  const applyRange = (key: RangeKey) => {
+    const { from, to } = rangeToDates(key);
+    setRange(key);
+    setFilterDateFrom(from);
+    setFilterDateTo(to);
+  };
+
+  // Auto-load the next page when the sentinel scrolls into view. The button
+  // stays as a fallback for keyboard users and when the observer is unavailable.
+  const sentinel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = sentinel.current;
+    if (!el || !hasMore || loading || loadingMore) return;
+    const io = new IntersectionObserver(
+      (es) => es[0]?.isIntersecting && load(offset + LIMIT, { append: true }),
+      { rootMargin: "200px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, loading, loadingMore, offset, load]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -139,7 +196,9 @@ export function ActivityLogPage() {
             Activity Log
           </h1>
           <p className="mt-0.5 text-sm text-mist/50">
-            {total > 0 ? `${total.toLocaleString()} records` : "All system events"}
+            {total > 0
+              ? `Showing ${entries.length.toLocaleString()} of ${total.toLocaleString()} records`
+              : "All system events"}
           </p>
         </div>
         <Button variant="ghost" onClick={() => load(0)} disabled={loading}>
@@ -150,6 +209,25 @@ export function ActivityLogPage() {
 
       {/* Filters */}
       <Card className="p-4">
+        {/* Quick ranges — what an admin reaches for most of the time, so they
+            sit above the manual date pickers rather than behind them. */}
+        <div className="mb-3 flex flex-wrap gap-2">
+          {RANGES.map((r) => (
+            <button
+              key={r.key}
+              onClick={() => applyRange(r.key)}
+              className={cn(
+                "rounded-full border px-3.5 py-1.5 text-sm font-medium transition",
+                range === r.key
+                  ? "border-wave bg-wave/20 text-wave"
+                  : "border-white/10 text-mist/60 hover:text-mist",
+              )}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+
         <div className="flex flex-wrap items-end gap-3">
           {/* Category */}
           <div className="flex flex-col gap-1">
@@ -176,7 +254,7 @@ export function ActivityLogPage() {
               <input
                 type="date"
                 value={filterDateFrom}
-                onChange={(e) => setFilterDateFrom(e.target.value)}
+                onChange={(e) => { setFilterDateFrom(e.target.value); setRange("all"); }}
                 className="input py-2 pl-8 text-sm"
               />
             </div>
@@ -190,7 +268,7 @@ export function ActivityLogPage() {
               <input
                 type="date"
                 value={filterDateTo}
-                onChange={(e) => setFilterDateTo(e.target.value)}
+                onChange={(e) => { setFilterDateTo(e.target.value); setRange("all"); }}
                 className="input py-2 pl-8 text-sm"
               />
             </div>
@@ -237,7 +315,7 @@ export function ActivityLogPage() {
                 Array.from({ length: 8 }).map((_, i) => (
                   <tr key={i} className="border-b border-white/5">
                     <td colSpan={5} className="px-4 py-3">
-                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-full" style={{ animationDelay: `${i * 90}ms` }} />
                     </td>
                   </tr>
                 ))
@@ -279,28 +357,30 @@ export function ActivityLogPage() {
           </table>
         </div>
 
-        {/* Pagination */}
-        {pages > 1 && (
-          <div className="flex items-center justify-between border-t border-white/10 px-4 py-3">
-            <span className="text-xs text-mist/40">
-              Page {currentPage} of {pages} · {total.toLocaleString()} total
-            </span>
-            <div className="flex gap-2">
+        {/* Infinite scroll — the sentinel triggers the next page as it nears
+            the viewport; the button is the fallback for keyboard users. */}
+        {!loading && (
+          <div
+            ref={sentinel}
+            className="flex items-center justify-center gap-3 border-t border-white/10 px-4 py-4"
+          >
+            {loadingMore ? (
+              <span className="flex items-center gap-2 text-xs text-mist/50">
+                <Loader2 size={14} className="animate-spin text-wave" />
+                Loading more…
+              </span>
+            ) : hasMore ? (
               <Button
                 variant="ghost"
-                disabled={offset === 0 || loading}
-                onClick={() => load(Math.max(0, offset - LIMIT))}
+                onClick={() => load(offset + LIMIT, { append: true })}
               >
-                <ChevronLeft size={14} /> Prev
+                Load more
               </Button>
-              <Button
-                variant="ghost"
-                disabled={offset + LIMIT >= total || loading}
-                onClick={() => load(offset + LIMIT)}
-              >
-                Next <ChevronRight size={14} />
-              </Button>
-            </div>
+            ) : entries.length > 0 ? (
+              <span className="text-xs text-mist/30">
+                All {total.toLocaleString()} records loaded
+              </span>
+            ) : null}
           </div>
         )}
       </Card>

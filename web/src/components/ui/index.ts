@@ -5,6 +5,7 @@ export { Card } from "./Card";
 export { Chip } from "./Chip";
 export { Skeleton } from "./Skeleton";
 export { Spinner } from "./Spinner";
+export { LoadingState, LoadingRows } from "./LoadingState";
 export { EmptyState } from "./EmptyState";
 export { QuantityStepper } from "./QuantityStepper";
 export { PageHeader } from "./PageHeader";

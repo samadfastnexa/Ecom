@@ -211,7 +211,15 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # Internationalization
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+
+# The business runs in Pakistan, and this drives timezone.localdate() — which
+# is the default entry_date for ledger entries and the date on plant delivery
+# records. Left on UTC, anything recorded between midnight and 5am Pakistan
+# time was filed under the PREVIOUS day, which is exactly when the early
+# delivery round happens.
+# USE_TZ stays True, so timestamps are still stored in UTC; only the local
+# calendar day changes.
+TIME_ZONE = os.environ.get('TIME_ZONE', 'Asia/Karachi')
 USE_I18N = True
 USE_TZ = True
 
