@@ -4,7 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { TouchableOpacity, Text, StyleSheet, View, ActivityIndicator } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 // Customer / shared screens
@@ -208,6 +208,7 @@ const AdminTabs = () => (
 
 const AppContent = () => {
   const { user, isBootstrapping } = useContext(AuthContext);
+  const insets = useSafeAreaInsets();
   const isDeliveryBoy = user?.user_type === 'delivery_boy';
   const isAdmin = user?.is_staff === true;
 
@@ -216,15 +217,28 @@ const AppContent = () => {
   // discard whatever the user had typed.
   if (isBootstrapping) return <SplashScreen />;
 
+  // android.edgeToEdgeEnabled draws content behind the system navigation bar,
+  // so every full-screen route needs the bottom inset or its last row sits
+  // under the nav buttons / gesture pill. Applying it once here covers all of
+  // them; the tab containers opt out below because their tab bar already
+  // reserves that space itself.
+  const screenContentStyle = { paddingBottom: insets.bottom };
+  const tabHostOptions = {
+    headerShown: false,
+    contentStyle: { paddingBottom: 0 },
+  } as const;
+
   return (
     <NavigationContainer>
-      <Stack.Navigator screenOptions={headerOptions()}>
+      <Stack.Navigator
+        screenOptions={{ ...headerOptions(), contentStyle: screenContentStyle }}
+      >
         {user ? (
           <>
             {isAdmin ? (
-              <Stack.Screen name="AdminTabs" component={AdminTabs} options={{ headerShown: false }} />
+              <Stack.Screen name="AdminTabs" component={AdminTabs} options={tabHostOptions} />
             ) : (
-              <Stack.Screen name="MainTabs" component={MainTabs} options={{ headerShown: false }} />
+              <Stack.Screen name="MainTabs" component={MainTabs} options={tabHostOptions} />
             )}
 
             {!isDeliveryBoy && !isAdmin && (

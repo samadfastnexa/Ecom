@@ -71,7 +71,7 @@ export const CartScreen: React.FC<Props> = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <FlatList
         data={items}
         renderItem={renderItem}

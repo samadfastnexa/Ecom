@@ -56,7 +56,7 @@ export const HomeScreen: React.FC = () => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <View style={styles.headerContainer}>
         <Text style={styles.header}>{t('latest_products', 'Latest Products')}</Text>
       </View>

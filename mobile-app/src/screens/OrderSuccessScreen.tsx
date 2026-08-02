@@ -11,7 +11,7 @@ export const OrderSuccessScreen: React.FC<Props> = ({ route, navigation }) => {
   const { orderId, total } = route.params;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.iconContainer}>
           <Ionicons name="checkmark-circle" size={88} color="#2ecc71" />

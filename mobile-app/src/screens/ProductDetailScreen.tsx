@@ -23,7 +23,7 @@ export const ProductDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {product.image ? (
           <Image source={{ uri: product.image }} style={styles.image} resizeMode="cover" />
