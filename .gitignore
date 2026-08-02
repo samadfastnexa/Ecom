@@ -31,6 +31,9 @@ web-build/
 *.pem
 # google-services.json is intentionally tracked (safe to embed; needed by EAS).
 service-account*.json
+# Written by `eas credentials` → Download credentials. Contains the keystore
+# passwords in plain text, so it must never be committed.
+credentials.json
 
 # ─── Build archives / bundles (never commit these) ─────────
 *.zip
