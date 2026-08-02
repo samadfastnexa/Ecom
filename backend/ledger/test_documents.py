@@ -90,6 +90,49 @@ class LedgerStatementTests(LedgerTestMixin, TestCase):
         manual_only = build_statement(self.customer, source='manual')
         self.assertTrue(all(r.source == 'manual' for r in manual_only['rows']))
 
+    def test_filtered_statement_keeps_the_true_running_balance(self):
+        """
+        Regression: the running balance used to accumulate only the filtered
+        rows, so a source-filtered statement printed a "balance" that was not
+        what the customer owed — 1,950 instead of 900 on this fixture.
+        """
+        real = -self.balance(self.customer)          # owed-positive
+        unfiltered = build_statement(self.customer)
+        # These fixture rows carry no source FK, so they are all 'manual'.
+        filtered = build_statement(self.customer, entry_type=LedgerEntry.PLANT_CHARGE)
+
+        # Closing balance describes the account, so a filter must not change it.
+        self.assertEqual(unfiltered['closing_balance'], real)
+        self.assertEqual(filtered['closing_balance'], real)
+
+        # The filter really did narrow the rows...
+        self.assertEqual(len(filtered['rows']), 3)
+        self.assertLess(len(filtered['rows']), len(unfiltered['rows']))
+
+        # ...yet each visible row keeps the balance as at its own date, taken
+        # from the full chronological sequence rather than the subset.
+        by_date = {r.entry_date: r.running_balance for r in unfiltered['rows']}
+        for row in filtered['rows']:
+            self.assertEqual(row.running_balance, by_date[row.entry_date])
+        # Subset-accumulation would have produced 300/1050/1950 here.
+        self.assertEqual(
+            [r.running_balance for r in filtered['rows']],
+            [Decimal('4650'), Decimal('5400'), Decimal('900')],
+        )
+
+    def test_filter_narrows_totals_but_not_the_balance(self):
+        """Totals describe the rows on screen; the balance describes the account."""
+        charges = build_statement(self.customer, entry_type=LedgerEntry.PLANT_CHARGE)
+        self.assertEqual(charges['totals']['debit'], Decimal('1950'))   # 3 deliveries
+        self.assertEqual(charges['totals']['credit'], Decimal('0'))     # payment excluded
+        self.assertEqual(charges['closing_balance'], Decimal('900'))    # still the truth
+
+    def test_source_filter_excludes_rows_without_that_fk(self):
+        """`source` is decided by the FK, not the entry_type label."""
+        plant = build_statement(self.customer, source='plant')
+        self.assertEqual(len(plant['rows']), 0)          # fixture rows have no FK
+        self.assertEqual(plant['closing_balance'], Decimal('900'))
+
 
 class LedgerPdfTests(LedgerTestMixin, TestCase):
 

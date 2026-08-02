@@ -53,45 +53,63 @@ def build_statement(customer, *, start=None, end=None, entry_type=None, source=N
     opening_balance = -prior_totals['amount']
     opening_stock = prior_totals['bottles_out'] - prior_totals['bottles_in']
 
+    # The whole period, before any source/type filter. The running balance has to
+    # be walked over EVERY entry in date order — computing it from a filtered
+    # subset would print a "balance" that is not what the customer actually owes.
     period = entries
     if start:
         period = period.filter(entry_date__gte=start)
     if end:
         period = period.filter(entry_date__lte=end)
-    if entry_type:
-        period = period.filter(entry_type=entry_type)
-    if source == 'shop':
-        period = period.filter(order__isnull=False)
-    elif source == 'plant':
-        period = period.filter(delivery_record__isnull=False)
-    elif source == 'manual':
-        period = period.filter(order__isnull=True, delivery_record__isnull=True)
 
-    rows = list(period.order_by(*ROW_ORDER))
-
-    # Walk the rows to produce the running balance and stock columns.
     balance = opening_balance
     stock = opening_stock
-    debit_total = credit_total = ZERO
-    for row in rows:
+    all_rows = list(period.order_by(*ROW_ORDER))
+    for row in all_rows:
         balance -= row.amount           # amount is credit-positive; balance is owed-positive
         stock += row.bottles_out - row.bottles_in
         row.running_balance = balance
         row.stock_after = stock
+
+    # closing_* describe the account, so they stay unfiltered.
+    closing_balance, closing_stock = balance, stock
+
+    # Now narrow to what is actually displayed. Each surviving row keeps the
+    # true balance as at its own date.
+    def _matches(row):
+        if entry_type and row.entry_type != entry_type:
+            return False
+        if source == 'shop':
+            return row.order_id is not None
+        if source == 'plant':
+            return row.delivery_record_id is not None
+        if source == 'manual':
+            return row.order_id is None and row.delivery_record_id is None
+        return True
+
+    rows = [r for r in all_rows if _matches(r)]
+
+    # Totals describe the rows on screen, so these DO follow the filter.
+    debit_total = credit_total = ZERO
+    for row in rows:
         if row.amount < ZERO:
             debit_total += -row.amount
         else:
             credit_total += row.amount
 
-    period_totals = _totals(period)
+    period_totals = {
+        'quantity': sum((r.quantity or ZERO) for r in rows) or ZERO,
+        'bottles_out': sum(r.bottles_out for r in rows),
+        'bottles_in': sum(r.bottles_in for r in rows),
+    }
 
     return {
         'customer': customer,
         'period': {'start': start, 'end': end},
         'opening_balance': opening_balance,
-        'closing_balance': balance,
+        'closing_balance': closing_balance,
         'opening_stock': opening_stock,
-        'closing_stock': stock,
+        'closing_stock': closing_stock,
         'totals': {
             'debit': debit_total,
             'credit': credit_total,
