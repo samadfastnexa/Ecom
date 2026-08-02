@@ -29,9 +29,13 @@ describe('RegisterScreen Password Toggle', () => {
   const defaultContext = {
     register: mockRegister,
     isLoading: false,
+    isBootstrapping: false,
     error: null,
     user: null,
+    token: null,
     login: jest.fn(),
+    loginWithGoogle: jest.fn(),
+    updateProfile: jest.fn(),
     logout: jest.fn(),
     checkAuthStatus: jest.fn(),
   };

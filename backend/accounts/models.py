@@ -83,8 +83,23 @@ class UserProfile(models.Model):
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     user_type = models.CharField(max_length=20, choices=USER_TYPE_CHOICES, default='customer')
+    customer_code = models.CharField(
+        max_length=12, unique=True, null=True, blank=True, db_index=True,
+        help_text="Short account code shown on ledger statements, e.g. 00245. "
+                  "Assigned automatically on first use.",
+    )
     phone_number = models.CharField(max_length=20, blank=True, null=True)
-    address = models.TextField(blank=True, null=True)
+    address = models.TextField(
+        blank=True, null=True,
+        help_text="Full delivery address; kept in sync with the structured parts below",
+    )
+    # ── Structured address parts (composed into `address`) ───────────────────
+    house_number = models.CharField(max_length=50, blank=True, null=True)
+    portion = models.CharField(
+        max_length=50, blank=True, null=True,
+        help_text="Ground floor / 1st floor / etc. — optional",
+    )
+    block_area = models.CharField(max_length=150, blank=True, null=True)
     current_location = models.CharField(max_length=255, blank=True, null=True)
     is_available = models.BooleanField(default=True)
     vehicle_type = models.CharField(max_length=50, blank=True, null=True)
@@ -136,6 +151,18 @@ class UserProfile(models.Model):
         today = date.today()
         dob = self.date_of_birth
         return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+    def compose_address(self):
+        """Join the structured parts into a single human-readable address line."""
+        parts = [self.house_number, self.portion, self.block_area]
+        return ', '.join(p.strip() for p in parts if p and p.strip())
+
+    def sync_address(self):
+        """Refresh `address` from the structured parts when any of them is set."""
+        composed = self.compose_address()
+        if composed:
+            self.address = composed
+        return self.address
 
     def __str__(self):
         return f"{self.user.username} - {self.get_user_type_display()}"

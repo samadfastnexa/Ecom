@@ -29,9 +29,13 @@ describe('LoginScreen Password Toggle', () => {
   const defaultContext = {
     login: mockLogin,
     isLoading: false,
+    isBootstrapping: false,
     error: null,
     user: null,
+    token: null,
     register: jest.fn(),
+    loginWithGoogle: jest.fn(),
+    updateProfile: jest.fn(),
     logout: jest.fn(),
     checkAuthStatus: jest.fn(),
   };

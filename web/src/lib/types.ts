@@ -242,6 +242,11 @@ export interface RegisterPayload {
   password_confirm: string;
   first_name?: string;
   last_name?: string;
+  phone_number: string;
+  /** Structured delivery address — the backend composes these into `address`. */
+  house_number: string;
+  portion?: string;
+  block_area: string;
 }
 
 export interface UpdateProfilePayload {

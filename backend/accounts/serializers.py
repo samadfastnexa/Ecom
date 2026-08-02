@@ -1,8 +1,24 @@
+import re
+
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from rest_framework.validators import UniqueValidator
 from .models import UserProfile, NotificationTemplate
+
+# Pakistani mobile numbers: 03xx-xxxxxxx, +923xxxxxxxxx or 923xxxxxxxxx
+_PHONE_SEPARATORS = re.compile(r'[\s\-().]')
+_PHONE_PATTERN = re.compile(r'^(?:\+92|92|0)3\d{9}$')
+
+
+def normalize_phone_number(value):
+    """Strip separators and return the number in local 03xxxxxxxxx form."""
+    cleaned = _PHONE_SEPARATORS.sub('', value or '')
+    if not _PHONE_PATTERN.match(cleaned):
+        raise serializers.ValidationError(
+            'Enter a valid mobile number, e.g. 0300-1234567.'
+        )
+    return '0' + cleaned[-10:]
 
 
 class NotificationTemplateSerializer(serializers.ModelSerializer):
@@ -51,10 +67,22 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
     address = serializers.CharField(
         source='profile.address', allow_blank=True, allow_null=True, required=False
     )
+    house_number = serializers.CharField(
+        source='profile.house_number', allow_blank=True, allow_null=True, required=False
+    )
+    portion = serializers.CharField(
+        source='profile.portion', allow_blank=True, allow_null=True, required=False
+    )
+    block_area = serializers.CharField(
+        source='profile.block_area', allow_blank=True, allow_null=True, required=False
+    )
 
     class Meta:
         model = User
-        fields = ('username', 'first_name', 'last_name', 'email', 'phone_number', 'address')
+        fields = (
+            'username', 'first_name', 'last_name', 'email', 'phone_number',
+            'address', 'house_number', 'portion', 'block_area',
+        )
         extra_kwargs = {
             'email': {'required': False},
             'first_name': {'required': False},
@@ -70,6 +98,12 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
             profile = instance.profile
             for attr, value in profile_data.items():
                 setattr(profile, attr, value)
+            # A structured part changed and no explicit address was sent —
+            # rebuild the display address from the parts.
+            if 'address' not in profile_data and any(
+                k in profile_data for k in ('house_number', 'portion', 'block_area')
+            ):
+                profile.sync_address()
             profile.save()
         return instance
 
@@ -95,14 +129,27 @@ class RegisterSerializer(serializers.ModelSerializer):
         write_only=True, required=True, validators=[validate_password], min_length=8
     )
     password_confirm = serializers.CharField(write_only=True, required=True)
+    phone_number = serializers.CharField(write_only=True, required=True)
+    house_number = serializers.CharField(write_only=True, required=True, max_length=50)
+    portion = serializers.CharField(
+        write_only=True, required=False, allow_blank=True, default='', max_length=50
+    )
+    block_area = serializers.CharField(write_only=True, required=True, max_length=150)
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'password', 'password_confirm', 'first_name', 'last_name')
+        fields = (
+            'username', 'email', 'password', 'password_confirm',
+            'first_name', 'last_name',
+            'phone_number', 'house_number', 'portion', 'block_area',
+        )
         extra_kwargs = {
             'first_name': {'required': False},
             'last_name': {'required': False},
         }
+
+    def validate_phone_number(self, value):
+        return normalize_phone_number(value)
 
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:
@@ -130,7 +177,15 @@ class RegisterSerializer(serializers.ModelSerializer):
         user.save()
         profile = user.profile
         profile.user_type = 'customer'
-        profile.save(update_fields=['user_type'])
+        profile.phone_number = validated_data['phone_number']
+        profile.house_number = validated_data['house_number'].strip()
+        profile.portion = (validated_data.get('portion') or '').strip()
+        profile.block_area = validated_data['block_area'].strip()
+        profile.sync_address()
+        profile.save(update_fields=[
+            'user_type', 'phone_number', 'house_number', 'portion',
+            'block_area', 'address',
+        ])
         return user
 
 
@@ -349,6 +404,9 @@ class UserSerializer(serializers.ModelSerializer):
     user_type = serializers.CharField(source='profile.user_type', read_only=True)
     phone_number = serializers.CharField(source='profile.phone_number', read_only=True)
     address = serializers.CharField(source='profile.address', read_only=True)
+    house_number = serializers.CharField(source='profile.house_number', read_only=True)
+    portion = serializers.CharField(source='profile.portion', read_only=True)
+    block_area = serializers.CharField(source='profile.block_area', read_only=True)
     is_available = serializers.BooleanField(source='profile.is_available', read_only=True)
     vehicle_type = serializers.CharField(source='profile.vehicle_type', read_only=True)
     vehicle_number = serializers.CharField(source='profile.vehicle_number', read_only=True)
@@ -374,7 +432,8 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = (
             'id', 'username', 'email', 'first_name', 'last_name',
-            'user_type', 'phone_number', 'address', 'is_available',
+            'user_type', 'phone_number', 'address',
+            'house_number', 'portion', 'block_area', 'is_available',
             'vehicle_type', 'vehicle_number', 'account_balance',
             'is_staff', 'can_manage_plant',
             'employee_id', 'designation', 'department', 'emergency_contact',

@@ -16,7 +16,15 @@ const EMPTY = {
   email: "",
   password: "",
   password_confirm: "",
+  phone_number: "",
+  house_number: "",
+  portion: "",
+  block_area: "",
 };
+
+// Pakistani mobile numbers: 03xx-xxxxxxx, +923xxxxxxxxx or 923xxxxxxxxx
+const PHONE_PATTERN = /^(?:\+92|92|0)3\d{9}$/;
+const stripPhoneSeparators = (value: string) => value.replace(/[\s\-().]/g, "");
 
 export function RegisterForm() {
   const { register } = useAuth();
@@ -40,9 +48,17 @@ export function RegisterForm() {
       return;
     }
 
+    if (!PHONE_PATTERN.test(stripPhoneSeparators(form.phone_number))) {
+      setError("Enter a valid mobile number, e.g. 0300-1234567.");
+      return;
+    }
+
     setLoading(true);
     try {
-      await register(form);
+      await register({
+        ...form,
+        phone_number: stripPhoneSeparators(form.phone_number),
+      });
       notify("Account created — welcome aboard!");
       router.push("/");
     } catch (err) {
@@ -125,6 +141,45 @@ export function RegisterForm() {
         <p className="text-xs text-mist/50">
           Password needs 8+ chars with upper, lower, a digit and a special
           character.
+        </p>
+
+        <Input
+          label="Phone number"
+          type="tel"
+          value={form.phone_number}
+          onChange={set("phone_number")}
+          placeholder="03xx-xxxxxxx"
+          autoComplete="tel"
+          required
+        />
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Input
+            label="House number"
+            value={form.house_number}
+            onChange={set("house_number")}
+            placeholder="e.g. H-12 or 45-A"
+            maxLength={50}
+            required
+          />
+          <Input
+            label="Portion (optional)"
+            value={form.portion}
+            onChange={set("portion")}
+            placeholder="e.g. Ground Floor"
+            maxLength={50}
+          />
+        </div>
+        <Input
+          label="Block / Area"
+          value={form.block_area}
+          onChange={set("block_area")}
+          placeholder="e.g. Block 6, Gulshan-e-Iqbal"
+          maxLength={150}
+          required
+        />
+        <p className="text-xs text-mist/50">
+          We use this as your default delivery address.
         </p>
 
         {error && (
