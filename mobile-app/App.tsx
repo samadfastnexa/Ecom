@@ -34,6 +34,7 @@ import { AdminNotificationScreen } from './src/screens/admin/AdminNotificationSc
 import { AdminPlantScreen } from './src/screens/admin/AdminPlantScreen';
 import { AdminLedgerScreen } from './src/screens/admin/AdminLedgerScreen';
 import { AdminShopScreen } from './src/screens/admin/AdminShopScreen';
+import { AdminRiderMapScreen } from './src/screens/admin/AdminRiderMapScreen';
 
 import { RootStackParamList, MainTabParamList, AdminTabParamList } from './src/types/navigation';
 import { CartProvider, useCart } from './src/context/CartContext';
@@ -272,6 +273,7 @@ const AppContent = () => {
                 <Stack.Screen name="AdminPlant"         component={AdminPlantScreen}         options={{ headerTitle: 'Plant / Deliveries' }} />
                 <Stack.Screen name="AdminLedger"        component={AdminLedgerScreen}        options={{ headerTitle: 'Customer Ledger' }} />
                 <Stack.Screen name="AdminShop"          component={AdminShopScreen}          options={{ headerTitle: 'Shop Management' }} />
+                <Stack.Screen name="AdminRiderMap"      component={AdminRiderMapScreen}      options={{ headerTitle: 'Live Rider Map' }} />
               </>
             )}
 

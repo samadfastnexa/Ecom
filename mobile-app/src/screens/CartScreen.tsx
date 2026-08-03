@@ -9,7 +9,9 @@ import { useLanguage } from '../context/LanguageContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Cart'>;
 
-const DELIVERY_FEE = 0; // Free delivery
+// Annotated `number` rather than inferred as the literal 0, or the "fee > 0"
+// branch below narrows to `never` and stops compiling the moment a fee exists.
+const DELIVERY_FEE: number = 0; // Free delivery
 
 export const CartScreen: React.FC<Props> = ({ navigation }) => {
   const { items, removeFromCart, updateQuantity, getCartTotal } = useCart();

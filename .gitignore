@@ -50,3 +50,8 @@ yarn-error.*
 .DS_Store
 Thumbs.db
 *.orig
+
+# Production data dumps — contain password hashes and customer PII, never commit
+century_data.json
+century_mysql_dump.sql
+*_mysql_dump.sql

@@ -15,8 +15,11 @@ if _ENV_PATH.exists():
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: don't run with debug turned on in production!
-# Set DEBUG=False in the environment on the server.
-DEBUG = os.environ.get('DEBUG', 'True').strip().lower() in ('true', '1', 'yes')
+# Defaults to OFF so that a missing or misspelled DEBUG on the server cannot
+# silently downgrade the deployment — debug tracebacks, ALLOWED_HOSTS=['*'] and
+# the public fallback SECRET_KEY (which would let anyone forge a JWT) all hang
+# off this flag. Local development opts in with DEBUG=True in backend/.env.
+DEBUG = os.environ.get('DEBUG', 'False').strip().lower() in ('true', '1', 'yes')
 
 # SECRET_KEY must come from the environment in production. The insecure fallback
 # is used only for local development (DEBUG=True) — never in production, where a
@@ -26,7 +29,10 @@ if not SECRET_KEY:
     if DEBUG:
         SECRET_KEY = 'django-insecure-dev-key-for-now'
     else:
-        raise RuntimeError('SECRET_KEY environment variable must be set when DEBUG=False.')
+        raise RuntimeError(
+            'SECRET_KEY environment variable must be set when DEBUG=False. '
+            'For local development set DEBUG=True in backend/.env instead.'
+        )
 
 # Comma-separated list in the environment, e.g.
 # ALLOWED_HOSTS=century.zipnixtechnologies.com
@@ -77,7 +83,13 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_THROTTLE_RATES': {
         'anon': '10/minute',
-        'user': '100/minute'
+        'user': '100/minute',
+        # Riders report their position around the clock, so the shared 100/minute
+        # user rate would 429 them along with the rest of the app's traffic.
+        # RiderLocationView opts out of the defaults into this budget instead.
+        # Backpressure only, not a security limit: with no CACHES configured the
+        # counters live in per-process memory, so N workers means N× the rate.
+        'rider_location': '240/minute'
     }
 }
 

@@ -12,6 +12,8 @@ from .views import (
     AdminResetPasswordView, AdminSendNotificationView, AdminNotificationHistoryView,
     NotificationTemplateListCreateView, NotificationTemplateDetailView,
     GoogleAuthView, MobileProfileConfigView, AdminMobileProfileConfigView,
+    RiderLocationView, AdminRiderLocationListView, AdminRiderTrailView,
+    TrackingConfigView,
 )
 
 urlpatterns = [
@@ -48,6 +50,14 @@ urlpatterns = [
     path('mobile-profile-config/', MobileProfileConfigView.as_view(), name='mobile-profile-config'),
     path('admin/mobile-profile-config/', AdminMobileProfileConfigView.as_view(), name='admin-mobile-profile-config-list'),
     path('admin/mobile-profile-config/<str:user_type>/', AdminMobileProfileConfigView.as_view(), name='admin-mobile-profile-config'),
+
+    # Rider location tracking
+    path('rider/location/', RiderLocationView.as_view(), name='rider-location'),
+    path('tracking-config/', TrackingConfigView.as_view(), name='tracking-config'),
+    # Listed before the <int:pk> staff routes below, and note the trail is keyed
+    # by User id while those are keyed by UserProfile id.
+    path('admin/riders/locations/', AdminRiderLocationListView.as_view(), name='admin-rider-locations'),
+    path('admin/riders/<int:user_id>/trail/', AdminRiderTrailView.as_view(), name='admin-rider-trail'),
 
     # Legacy rider aliases (keep for backward compat)
     path('admin/riders/', AdminStaffListCreateView.as_view(), name='admin-rider-list'),

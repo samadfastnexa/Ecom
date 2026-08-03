@@ -34,6 +34,23 @@ export const MEDIA_URL = USE_LOCAL
  */
 export const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
 
+/**
+ * Google Maps JavaScript API browser key, for the live rider map.
+ *
+ * ⚠️ This value is baked into the static bundle at build time and is fully
+ * readable by anyone who loads the admin panel — a static export has no server
+ * to proxy it through, so there is no way to hide it. Restrict the key by HTTP
+ * referrer (Google Cloud Console → Credentials → Application restrictions →
+ * Websites) to the admin origin, and by API (Maps JavaScript API only).
+ * An unrestricted key here is billable by anyone who copies it.
+ *
+ * Empty means the map itself is not rendered — the Live Map tab falls back to
+ * the rider list with a "map key not configured" notice, so tracking data is
+ * still readable without it.
+ */
+export const GOOGLE_MAPS_API_KEY =
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
+
 export const STORAGE_KEYS = {
   access: "ecom_access",
   refresh: "ecom_refresh",

@@ -486,6 +486,73 @@ export type RiderProfile = StaffProfile;
 export type CreateRiderPayload = CreateStaffPayload;
 export type UpdateRiderPayload = UpdateStaffPayload;
 
+/* ---------- Rider location tracking ---------- */
+
+/**
+ * The tracking endpoints page with limit/offset and no next/previous links,
+ * so they don't fit `Paginated<T>` and must not be run through `unwrapList`.
+ */
+export interface OffsetPaginated<T> {
+  count: number; // total BEFORE slicing
+  limit: number;
+  offset: number;
+  results: T[];
+}
+
+/** A rider's current pin from /auth/admin/riders/locations/. */
+export interface RiderLocation {
+  /** Django User id — this is what the trail endpoint takes. */
+  rider_id: number;
+  /** UserProfile id — this is what every other ridersApi path takes. */
+  profile_id: number;
+  username: string;
+  name: string;
+  phone: string | null;
+  vehicle_number: string | null;
+  is_available: boolean;
+  /**
+   * Real JSON numbers, not DRF's usual quoted decimals. A Google Maps
+   * LatLngLiteral silently refuses to draw a pin for a stringy coordinate,
+   * so don't "helpfully" widen these to `string | number`.
+   */
+  latitude: number;
+  longitude: number;
+  accuracy_m: number | null;
+  speed_kmh: number | null;
+  heading: number | null;
+  battery_level: number | null;
+  is_moving: boolean;
+  /** Device clock — what staleness and ordering are judged on. */
+  recorded_at: string;
+  /** Server clock — later than recorded_at by the upload delay. */
+  received_at: string;
+  is_stale: boolean;
+  minutes_ago: number;
+  active_orders: number;
+}
+
+/** One breadcrumb from /auth/admin/riders/<user_id>/trail/. */
+export interface RiderTrailPoint {
+  id: number;
+  latitude: number;
+  longitude: number;
+  accuracy_m: number | null;
+  recorded_at: string;
+}
+
+export type TrackingMode = "always" | "active_delivery" | "foreground";
+
+/** Read-only singleton; edited from Django admin, there is no write endpoint. */
+export interface TrackingConfig {
+  tracking_enabled: boolean;
+  tracking_mode: TrackingMode;
+  ping_interval_seconds: number;
+  ping_distance_meters: number;
+  trail_retention_days: number;
+  stale_after_minutes: number;
+  updated_at: string;
+}
+
 /* ---------- Customer ledger ---------- */
 
 export type LedgerEntryType =

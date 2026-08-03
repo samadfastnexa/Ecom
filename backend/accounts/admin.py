@@ -2,7 +2,10 @@ from django.contrib import admin
 from django.contrib.auth.models import User, Group, Permission
 from django.contrib.auth.admin import UserAdmin, GroupAdmin as BaseGroupAdmin
 from django.utils.html import format_html
-from .models import Area, UserProfile, NotificationHistory
+from .models import (
+    Area, UserProfile, NotificationHistory,
+    RiderLocation, RiderLocationPing, TrackingSettings,
+)
 
 class UserProfileInline(admin.StackedInline):
     model = UserProfile
@@ -226,6 +229,76 @@ class NotificationHistoryAdmin(admin.ModelAdmin):
     def has_change_permission(self, request, obj=None):
         # Make read-only
         return False
+
+
+@admin.register(TrackingSettings)
+class TrackingSettingsAdmin(admin.ModelAdmin):
+    """Editable on purpose — this is the knob that changes app behaviour without a rebuild."""
+
+    list_display = (
+        'tracking_enabled', 'tracking_mode', 'ping_interval_seconds',
+        'ping_distance_meters', 'trail_retention_days', 'updated_at',
+    )
+
+    def has_add_permission(self, request):
+        # Singleton — created on demand by TrackingSettings.load().
+        return not TrackingSettings.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(RiderLocation)
+class RiderLocationAdmin(admin.ModelAdmin):
+    """
+    Read-only. Every row here is written by the rider's own device; editing a
+    coordinate by hand would put a pin somewhere the rider has never been, with
+    nothing in the trail to contradict it.
+    """
+
+    list_display = (
+        'rider', 'latitude', 'longitude', 'speed_kmh', 'battery_level',
+        'is_moving', 'recorded_at', 'received_at', 'stale_display',
+    )
+    list_filter = ('is_moving',)
+    search_fields = ('rider__username', 'rider__first_name', 'rider__last_name')
+    ordering = ('-recorded_at',)
+    list_select_related = ('rider',)
+
+    def stale_display(self, obj):
+        return obj.is_stale
+    stale_display.short_description = 'Stale'
+    stale_display.boolean = True
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(RiderLocationPing)
+class RiderLocationPingAdmin(admin.ModelAdmin):
+    """Read-only: the trail is append-only, and pruned by prune_rider_pings."""
+
+    list_display = ('rider', 'latitude', 'longitude', 'accuracy_m', 'recorded_at', 'created_at')
+    search_fields = ('rider__username', 'rider__first_name', 'rider__last_name')
+    date_hierarchy = 'recorded_at'
+    ordering = ('-recorded_at',)
+    list_select_related = ('rider',)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 # Unregister the default User and Group admins, then register our custom ones
 admin.site.unregister(User)

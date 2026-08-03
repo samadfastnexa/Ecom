@@ -111,6 +111,13 @@ export const AdminManageScreen: React.FC = () => {
       <SectionHeader title="MONITORING" />
       <View style={styles.card}>
         <MenuItem
+          icon="map"
+          color="#AF52DE"
+          label="Live Rider Map"
+          description="Where every rider is right now, and today's routes"
+          onPress={() => navigation.navigate('AdminRiderMap')}
+        />
+        <MenuItem
           icon="pulse"
           color="#FF2D55"
           label="Activity Log"

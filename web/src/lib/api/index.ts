@@ -5,6 +5,7 @@ export { authApi } from "./auth";
 export { complaintsApi, adminComplaintsApi } from "./support";
 export { plantApi } from "./plant";
 export { ridersApi } from "./riders";
+export { trackingApi, type TrailQuery } from "./tracking";
 export { staffApi } from "./staff";
 export { customersApi } from "./customers";
 export { passwordApi } from "./password";

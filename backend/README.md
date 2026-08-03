@@ -23,7 +23,7 @@ python manage.py runserver 0.0.0.0:8002
 | Var | Purpose |
 |-----|---------|
 | `SECRET_KEY` | Django secret. **Required when `DEBUG=False`** (app refuses to start without it). |
-| `DEBUG` | `True` locally, `False` in production. |
+| `DEBUG` | Defaults to `False` (production-safe). Set `DEBUG=True` in your local `.env`; never set it on the server. |
 | `ALLOWED_HOSTS` | Comma-separated hosts (required in production). |
 | `DB_ENGINE` | `postgresql` (local) or `mysql` (shared hosting). |
 | `DB_NAME` / `DB_USER` / `DB_PASSWORD` / `DB_HOST` / `DB_PORT` | Database connection. |

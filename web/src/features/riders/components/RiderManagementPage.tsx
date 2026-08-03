@@ -5,6 +5,7 @@ import {
   Bike,
   CheckCircle2,
   XCircle,
+  MapPin,
   Package,
   UserPlus,
   Plus,
@@ -17,6 +18,7 @@ import { Button, Card, PageHeader, Skeleton } from "@/components/ui";
 import { useRiders } from "../hooks/useRiders";
 import { AddRiderModal } from "./AddRiderModal";
 import { RiderDetailModal } from "./RiderDetailModal";
+import { RiderTrackingTab } from "./RiderTrackingTab";
 
 // ─── Summary cards ────────────────────────────────────────────────────────────
 
@@ -142,8 +144,16 @@ function RiderCard({
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+type Tab = "roster" | "map";
+
+const TABS: { key: Tab; label: string; icon: typeof Bike }[] = [
+  { key: "roster", label: "Riders", icon: Bike },
+  { key: "map", label: "Live Map", icon: MapPin },
+];
+
 export function RiderManagementPage() {
   const riders = useRiders();
+  const [tab, setTab] = useState<Tab>("roster");
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [selected, setSelected] = useState<RiderProfile | null>(null);
@@ -176,51 +186,79 @@ export function RiderManagementPage() {
         </Button>
       </div>
 
-      {/* Summary */}
-      {riders.loading ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
-        </div>
-      ) : riders.data && riders.data.length > 0 ? (
-        <SummaryCards riders={riders.data} />
-      ) : null}
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-white/10">
+        {TABS.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={cn(
+              "flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition",
+              tab === key
+                ? "border-wave text-wave"
+                : "border-transparent text-mist/60 hover:text-mist"
+            )}
+          >
+            <Icon size={16} /> {label}
+          </button>
+        ))}
+      </div>
 
-      {/* Search */}
-      {!riders.loading && (
-        <div className="relative max-w-sm">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-mist/40" />
-          <input
-            type="text"
-            placeholder="Search by name, phone, vehicle…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="input w-full py-2 pl-9 pr-3 text-sm"
-          />
-        </div>
+      {tab === "roster" && (
+        <>
+          {/* Summary */}
+          {riders.loading ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
+            </div>
+          ) : riders.data && riders.data.length > 0 ? (
+            <SummaryCards riders={riders.data} />
+          ) : null}
+
+          {/* Search */}
+          {!riders.loading && (
+            <div className="relative max-w-sm">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-mist/40" />
+              <input
+                type="text"
+                placeholder="Search by name, phone, vehicle…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="input w-full py-2 pl-9 pr-3 text-sm"
+              />
+            </div>
+          )}
+
+          {/* Grid */}
+          {riders.loading ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-44" />)}
+            </div>
+          ) : riders.error ? (
+            <Card className="border-rose-400/30 p-6 text-center text-rose-200">{riders.error}</Card>
+          ) : filtered.length === 0 ? (
+            <Card className="p-12 text-center text-mist/40">
+              <UserPlus size={36} className="mx-auto mb-3 opacity-30" />
+              <p className="text-sm">
+                {riders.data?.length === 0
+                  ? "No delivery boys registered yet. Add your first rider."
+                  : "No riders match the search."}
+              </p>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((rider) => (
+                <RiderCard key={rider.id} rider={rider} onView={() => setSelected(rider)} />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
-      {/* Grid */}
-      {riders.loading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-44" />)}
-        </div>
-      ) : riders.error ? (
-        <Card className="border-rose-400/30 p-6 text-center text-rose-200">{riders.error}</Card>
-      ) : filtered.length === 0 ? (
-        <Card className="p-12 text-center text-mist/40">
-          <UserPlus size={36} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">
-            {riders.data?.length === 0
-              ? "No delivery boys registered yet. Add your first rider."
-              : "No riders match the search."}
-          </p>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((rider) => (
-            <RiderCard key={rider.id} rider={rider} onView={() => setSelected(rider)} />
-          ))}
-        </div>
+      {/* Mounted only while the tab is open, so the Maps SDK is fetched on
+          demand and the position poll stops the moment the operator leaves. */}
+      {tab === "map" && (
+        <RiderTrackingTab riders={riders.data ?? []} onOpenRider={setSelected} />
       )}
 
       <AddRiderModal

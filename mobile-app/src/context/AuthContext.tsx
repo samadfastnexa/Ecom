@@ -2,6 +2,7 @@ import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authService } from '../services/authService';
 import { registerForPushNotificationsAsync, sendPushTokenToBackend } from '../services/notificationService';
+import { startRiderTracking, stopRiderTracking, stopRiderTrackingForLogout } from '../services/locationService';
 
 interface User {
   id: number;
@@ -106,6 +107,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
     }
   }, [user]);
+
+  // Location sharing is rider-only. The else branch matters as much as the if:
+  // without it, an admin signing in on a phone a rider used would keep the
+  // background service alive under the wrong account. A session restored from
+  // storage sets `user` too, so tracking resumes on cold boot for free.
+  useEffect(() => {
+    if (user?.user_type !== 'delivery_boy') {
+      stopRiderTracking();
+      return;
+    }
+    startRiderTracking({ prompt: true });
+    return () => { stopRiderTracking(); };
+  }, [user?.id, user?.user_type]);
 
   const loadStorageData = async () => {
     try {
@@ -241,6 +255,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = async () => {
     setIsLoading(true);
+    // Before the tokens go: the final flush of queued pings still has to
+    // authenticate, and leftover fixes would otherwise be filed under whoever
+    // signs in next. Kept in its own try so a failure here cannot skip the
+    // multiRemove below and leave the user apparently logged in.
+    try {
+      await stopRiderTrackingForLogout();
+    } catch (e) {
+      console.error('Stop tracking failed', e);
+    }
     try {
       await AsyncStorage.multiRemove(['auth_token', 'refresh_token', 'auth_user']);
       setToken(null);

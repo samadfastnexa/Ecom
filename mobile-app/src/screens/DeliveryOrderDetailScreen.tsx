@@ -6,6 +6,7 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { updateOrderStatus, getDeliveryStatuses, DeliveryStatus } from '../services/orderService';
+import { startRiderTracking } from '../services/locationService';
 
 interface RouteParams {
   order: any;
@@ -96,6 +97,10 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
         };
       }
       await updateOrderStatus(order.id, order.status, updateData);
+      // In 'active_delivery' mode the rider's last open order is what keeps
+      // tracking alive — closing it here should stop it now, not whenever the
+      // app next happens to be resumed.
+      void startRiderTracking();
       Alert.alert(
         'Success',
         isStatusLocked ? 'Notes updated'

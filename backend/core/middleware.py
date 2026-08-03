@@ -8,6 +8,15 @@ logger = logging.getLogger('api')
 # before logging, so credentials/tokens never hit the logs.
 SENSITIVE_KEY_HINTS = ('password', 'token', 'secret', 'authorization', 'access', 'refresh')
 
+# Paths that are hit far too often to log. Rider location reports arrive every
+# minute per rider, around the clock — seven boxed lines each would bury every
+# other request and burn CPU formatting f-strings nobody reads.
+QUIET_PATHS = ('/api/auth/rider/location/',)
+
+
+def _should_log(path):
+    return path.startswith('/api/') and not path.startswith(QUIET_PATHS)
+
 
 def _mask_sensitive(value):
     """Recursively replace values of sensitive-looking keys with a placeholder."""
@@ -29,7 +38,7 @@ class RequestLoggingMiddleware(MiddlewareMixin):
 
     def process_request(self, request):
         # Only log API requests
-        if request.path.startswith('/api/'):
+        if _should_log(request.path):
             # Get user info
             user = getattr(request, 'user', None)
             username = user.username if user and user.is_authenticated else 'Anonymous'
@@ -60,7 +69,7 @@ class RequestLoggingMiddleware(MiddlewareMixin):
 
     def process_response(self, request, response):
         # Only log API responses
-        if request.path.startswith('/api/'):
+        if _should_log(request.path):
             status = response.status_code
             status_emoji = '✅' if 200 <= status < 300 else '⚠️' if 300 <= status < 400 else '❌'
 

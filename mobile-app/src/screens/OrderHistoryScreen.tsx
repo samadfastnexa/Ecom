@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, RefreshControl, ScrollView } from 'react-native';
 import { LoadingScreen } from '../components/LoadingScreen';
+import { TrackingStatusBanner } from '../components/TrackingStatusBanner';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { MainTabParamList } from '../types/navigation';
 import { getOrders, getDeliveryOrders, getDeliveryStatuses, Order, DeliveryStatus } from '../services/orderService';
@@ -185,6 +186,10 @@ export const OrderHistoryScreen: React.FC<Props> = ({ navigation }) => {
   return (
     <View style={styles.container}>
       {renderFilterChips()}
+
+      {/* Riders are tracked in the background, so they get told so on the very
+          screen they work from — not buried in a settings page. */}
+      {isDeliveryBoy && <TrackingStatusBanner />}
 
       {showEmpty ? (
         <ScrollView

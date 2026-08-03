@@ -1,10 +1,16 @@
 import re
+from datetime import timedelta
+from decimal import Decimal, ROUND_HALF_UP
 
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
+from django.utils import timezone
 from rest_framework.validators import UniqueValidator
-from .models import Area, UserProfile, NotificationTemplate
+from .models import (
+    Area, UserProfile, NotificationTemplate,
+    LOCATION_STALE_AFTER_MINUTES, RiderLocation, RiderLocationPing, TrackingSettings,
+)
 
 
 class AreaSerializer(serializers.ModelSerializer):
@@ -475,3 +481,193 @@ class UserSerializer(serializers.ModelSerializer):
             or obj.is_staff
             or obj.has_perm('plant.view_deliveryrecord')
         )
+
+
+# ── Rider location tracking ──────────────────────────────────────────────────
+
+COORDINATE_QUANTUM = Decimal('0.000001')
+
+# A device clock a little ahead of ours is normal; hours ahead is a broken clock
+# that would otherwise pin the rider in the future and keep them forever fresh.
+CLOCK_SKEW_TOLERANCE = timedelta(minutes=5)
+
+
+def _unknown_if_negative(value):
+    """
+    expo-location reports -1 for accuracy, speed and heading it could not
+    determine. Rejecting that would throw away an otherwise perfectly good fix,
+    so a negative reading is stored as "unknown" instead.
+    """
+    return None if value is None or value < 0 else value
+
+
+class _CoordinateField(serializers.DecimalField):
+    """
+    Takes whatever precision the GPS chip reports and rounds it to 6 dp.
+
+    Declaring decimal_places=6 here would 400 a perfectly good fix like
+    31.52037777 for being *too* precise, so precision is left open and the
+    value is quantized on the way in instead.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(max_digits=None, decimal_places=None, **kwargs)
+
+    def to_internal_value(self, data):
+        return super().to_internal_value(data).quantize(
+            COORDINATE_QUANTUM, rounding=ROUND_HALF_UP
+        )
+
+
+class RiderLocationPingInputSerializer(serializers.Serializer):
+    """
+    One reported fix.
+
+    Deliberately has no rider/user field: the row written is always
+    request.user's. Anything identifying a rider in the payload is ignored,
+    so one rider can never move another rider's pin.
+    """
+
+    latitude = _CoordinateField(min_value=Decimal('-90'), max_value=Decimal('90'))
+    longitude = _CoordinateField(min_value=Decimal('-180'), max_value=Decimal('180'))
+    accuracy_m = serializers.FloatField(required=False, allow_null=True)
+    speed_kmh = serializers.FloatField(required=False, allow_null=True)
+    heading = serializers.FloatField(required=False, allow_null=True)
+    battery_level = serializers.IntegerField(
+        required=False, allow_null=True, min_value=0, max_value=100
+    )
+    is_moving = serializers.BooleanField(required=False, default=False)
+    recorded_at = serializers.DateTimeField(required=False)
+
+    def validate_accuracy_m(self, value):
+        return _unknown_if_negative(value)
+
+    def validate_speed_kmh(self, value):
+        return _unknown_if_negative(value)
+
+    def validate_heading(self, value):
+        value = _unknown_if_negative(value)
+        return value % 360 if value is not None else None
+
+    def validate_recorded_at(self, value):
+        if value > timezone.now() + CLOCK_SKEW_TOLERANCE:
+            raise serializers.ValidationError('recorded_at is in the future.')
+        return value
+
+    def validate(self, attrs):
+        # Omitting recorded_at means "right now" — the common case for a live
+        # ping, where only a queued/offline flush carries its own timestamp.
+        if not attrs.get('recorded_at'):
+            attrs['recorded_at'] = timezone.now()
+        return attrs
+
+
+class RiderLocationEchoSerializer(serializers.ModelSerializer):
+    """
+    What the rider's own device gets back after reporting: just enough to
+    confirm which fix won, with none of the admin-only rider detail.
+    """
+
+    # Numbers, not strings. A Google Maps LatLngLiteral needs numbers, and a
+    # quoted coordinate fails silently as a pin that never appears.
+    latitude = serializers.DecimalField(
+        max_digits=9, decimal_places=6, coerce_to_string=False, read_only=True
+    )
+    longitude = serializers.DecimalField(
+        max_digits=10, decimal_places=6, coerce_to_string=False, read_only=True
+    )
+
+    class Meta:
+        model = RiderLocation
+        fields = ['latitude', 'longitude', 'recorded_at', 'received_at']
+
+
+class RiderLocationSerializer(serializers.ModelSerializer):
+    """A rider's current pin as the admin map consumes it."""
+
+    rider_id = serializers.IntegerField(source='rider.id', read_only=True)
+    profile_id = serializers.SerializerMethodField()
+    username = serializers.CharField(source='rider.username', read_only=True)
+    name = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
+    vehicle_number = serializers.SerializerMethodField()
+    is_available = serializers.SerializerMethodField()
+    latitude = serializers.DecimalField(
+        max_digits=9, decimal_places=6, coerce_to_string=False, read_only=True
+    )
+    longitude = serializers.DecimalField(
+        max_digits=10, decimal_places=6, coerce_to_string=False, read_only=True
+    )
+    is_stale = serializers.BooleanField(read_only=True)
+    minutes_ago = serializers.FloatField(read_only=True)
+    active_orders = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RiderLocation
+        fields = [
+            'rider_id', 'profile_id', 'username', 'name', 'phone', 'vehicle_number',
+            'is_available', 'latitude', 'longitude', 'accuracy_m', 'speed_kmh',
+            'heading', 'battery_level', 'is_moving', 'recorded_at', 'received_at',
+            'is_stale', 'minutes_ago', 'active_orders',
+        ]
+
+    def _profile(self, obj):
+        return getattr(obj.rider, 'profile', None)
+
+    def get_profile_id(self, obj):
+        profile = self._profile(obj)
+        return profile.id if profile else None
+
+    def get_name(self, obj):
+        return obj.rider.get_full_name() or obj.rider.username
+
+    def get_phone(self, obj):
+        profile = self._profile(obj)
+        return profile.phone_number if profile else None
+
+    def get_vehicle_number(self, obj):
+        profile = self._profile(obj)
+        return profile.vehicle_number if profile else None
+
+    def get_is_available(self, obj):
+        profile = self._profile(obj)
+        return profile.is_available if profile else None
+
+    def get_active_orders(self, obj):
+        # Counted once for the whole page and passed in via context; falling
+        # back to 0 keeps a single-object render from firing a stray query.
+        return self.context.get('active_orders', {}).get(obj.rider_id, 0)
+
+
+class RiderLocationPingSerializer(serializers.ModelSerializer):
+    """One breadcrumb on a rider's trail."""
+
+    latitude = serializers.DecimalField(
+        max_digits=9, decimal_places=6, coerce_to_string=False, read_only=True
+    )
+    longitude = serializers.DecimalField(
+        max_digits=10, decimal_places=6, coerce_to_string=False, read_only=True
+    )
+
+    class Meta:
+        model = RiderLocationPing
+        fields = ['id', 'latitude', 'longitude', 'accuracy_m', 'recorded_at']
+
+
+class TrackingSettingsSerializer(serializers.ModelSerializer):
+    """The policy the mobile app fetches on login and obeys."""
+
+    stale_after_minutes = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TrackingSettings
+        fields = [
+            'tracking_enabled', 'tracking_mode', 'ping_interval_seconds',
+            'ping_distance_meters', 'trail_retention_days',
+            'stale_after_minutes', 'updated_at',
+        ]
+
+    def get_stale_after_minutes(self, obj):
+        # Echoed so the web map and the app agree on when a pin goes grey
+        # instead of each hard-coding its own threshold.
+        return LOCATION_STALE_AFTER_MINUTES

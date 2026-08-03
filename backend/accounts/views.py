@@ -1,20 +1,29 @@
+from datetime import datetime, time, timedelta
+
 from rest_framework import generics
 from rest_framework.permissions import AllowAny, IsAuthenticated, BasePermission
+from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.shortcuts import get_object_or_404
-from django.db.models import Q
+from django.db.models import Count, Q
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from .serializers import (
     AreaSerializer, RegisterSerializer, UserSerializer,
     UpdateProfileSerializer, ChangePasswordSerializer,
     StaffProfileSerializer, CreateStaffSerializer, UpdateStaffSerializer,
     NotificationTemplateSerializer,
+    RiderLocationEchoSerializer, RiderLocationPingInputSerializer,
+    RiderLocationPingSerializer, RiderLocationSerializer,
+    TrackingSettingsSerializer,
 )
 from .models import (
     Area, UserProfile, MobileProfileConfig, PROFILE_FIELD_DEFAULTS,
-    NotificationTemplate,
+    NotificationTemplate, RiderLocation, RiderLocationPing, TrackingSettings,
 )
 from activities.service import log as activity_log
 
@@ -770,3 +779,255 @@ class AdminMobileProfileConfigView(APIView):
         obj.fields_config = current
         obj.save()
         return Response({'user_type': user_type, 'fields': obj.get_config()})
+
+
+# ─── Rider location tracking ─────────────────────────────────────────────────
+
+# Bounds one offline flush. At the 60s default interval this is over three
+# hours of queued fixes, and it keeps a single request from being unbounded.
+MAX_BATCH_PINGS = 200
+
+# Trails get their own caps: a whole day at the 60s default is 1440 points, so
+# the usual 500 ceiling would silently cut a route in half.
+TRAIL_DEFAULT_LIMIT = 500
+TRAIL_MAX_LIMIT = 2000
+
+LOCATION_DEFAULT_LIMIT = 100
+LOCATION_MAX_LIMIT = 500
+
+
+class IsDeliveryBoy(BasePermission):
+    """Grants access only to authenticated users whose profile is user_type='delivery_boy'."""
+    message = "Only delivery boys can access this endpoint."
+
+    def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return False
+        try:
+            return request.user.profile.user_type == 'delivery_boy'
+        except UserProfile.DoesNotExist:
+            return False
+
+
+class RiderLocationThrottle(UserRateThrottle):
+    """
+    Location reports are orders of magnitude more frequent than any other call,
+    so they get their own budget rather than eating the shared 100/minute user
+    rate. Setting throttle_classes on the view REPLACES the defaults, so that
+    cap no longer applies here.
+    """
+    scope = 'rider_location'
+
+
+def _paginate(request, default_limit, max_limit):
+    """limit/offset for the `{count, results}` shape the other apps return."""
+    try:
+        limit = min(int(request.query_params.get('limit', default_limit)), max_limit)
+    except (TypeError, ValueError):
+        limit = default_limit
+    try:
+        offset = max(int(request.query_params.get('offset', 0)), 0)
+    except (TypeError, ValueError):
+        offset = 0
+    return max(limit, 0), offset
+
+
+@transaction.atomic
+def _store_rider_fixes(rider, fixes):
+    """Append every fix to the trail, then move the pin to the newest of them."""
+    RiderLocationPing.objects.bulk_create([
+        RiderLocationPing(
+            rider=rider,
+            latitude=fix['latitude'],
+            longitude=fix['longitude'],
+            accuracy_m=fix.get('accuracy_m'),
+            recorded_at=fix['recorded_at'],
+        )
+        for fix in fixes
+    ])
+
+    newest = max(fixes, key=lambda fix: fix['recorded_at'])
+    current = RiderLocation.objects.select_for_update().filter(rider=rider).first()
+    # A queue flushed out of order, or a late duplicate, must never drag the
+    # pin backwards in time.
+    if current and current.recorded_at >= newest['recorded_at']:
+        return current
+
+    location, _ = RiderLocation.objects.update_or_create(
+        rider=rider,
+        defaults={
+            'latitude': newest['latitude'],
+            'longitude': newest['longitude'],
+            'accuracy_m': newest.get('accuracy_m'),
+            'speed_kmh': newest.get('speed_kmh'),
+            'heading': newest.get('heading'),
+            'battery_level': newest.get('battery_level'),
+            'is_moving': newest.get('is_moving', False),
+            'recorded_at': newest['recorded_at'],
+        },
+    )
+    return location
+
+
+class RiderLocationView(APIView):
+    """
+    POST /api/auth/rider/location/ — a rider reports their own position.
+
+    The body may be a single fix, a bare list of fixes, or {"pings": [...]},
+    so an app that was offline can flush its whole queue in one request.
+
+    Writes NO activity log on purpose: at one fix a minute per rider it would
+    bury every real business event in the log.
+    """
+    permission_classes = [IsDeliveryBoy]
+    throttle_classes = [RiderLocationThrottle]
+
+    def post(self, request):
+        rows = request.data
+        if isinstance(rows, dict):
+            rows = rows['pings'] if 'pings' in rows else [rows]
+        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+            return Response(
+                {'detail': 'Expected a location object or a list of location objects.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not rows:
+            return Response(
+                {'detail': 'No locations supplied.'}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(rows) > MAX_BATCH_PINGS:
+            return Response(
+                {'detail': f'At most {MAX_BATCH_PINGS} locations per request.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payload = RiderLocationPingInputSerializer(data=rows, many=True)
+        payload.is_valid(raise_exception=True)
+        fixes = payload.validated_data
+
+        current = _store_rider_fixes(request.user, fixes)
+        return Response(
+            {
+                'accepted': len(fixes),
+                'current': RiderLocationEchoSerializer(current).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class AdminRiderLocationListView(APIView):
+    """
+    GET /api/auth/admin/riders/locations/
+    Every rider who has a known position, freshest first.
+
+    Query params:
+        limit   — default 100, max 500
+        offset  — default 0
+    """
+    permission_classes = [IsStaff]
+
+    def get(self, request):
+        from orders.models import Order  # local import keeps accounts import-light
+
+        qs = (
+            RiderLocation.objects
+            .select_related('rider', 'rider__profile')
+            .order_by('-recorded_at')
+        )
+        total = qs.count()
+        limit, offset = _paginate(request, LOCATION_DEFAULT_LIMIT, LOCATION_MAX_LIMIT)
+        rows = list(qs[offset:offset + limit])
+
+        # One grouped query for the whole page instead of one per rider.
+        active_orders = {
+            row['assigned_delivery_boy__user_id']: row['open_count']
+            for row in Order.objects
+            .filter(assigned_delivery_boy__user_id__in=[row.rider_id for row in rows])
+            .exclude(status__in=['Delivered', 'Cancelled'])
+            .values('assigned_delivery_boy__user_id')
+            .annotate(open_count=Count('id'))
+        }
+
+        data = RiderLocationSerializer(
+            rows, many=True, context={'active_orders': active_orders},
+        ).data
+        return Response({
+            'count': total, 'results': data, 'limit': limit, 'offset': offset,
+        })
+
+
+class AdminRiderTrailView(APIView):
+    """
+    GET /api/auth/admin/riders/<user_id>/trail/
+    One rider's breadcrumb trail, oldest first so it can be handed straight to
+    a polyline.
+
+    `user_id` is the Django User id — the `rider_id` from the locations list,
+    NOT the UserProfile id the staff endpoints use.
+
+    Query params:
+        date    — YYYY-MM-DD; a whole local (Asia/Karachi) calendar day
+        since   — ISO timestamp; ignored when `date` is given
+        limit   — default 500, max 2000
+        offset  — default 0
+
+    With neither `date` nor `since`, today is returned.
+    """
+    permission_classes = [IsStaff]
+
+    def get(self, request, user_id):
+        rider = get_object_or_404(User, pk=user_id)
+        qs = RiderLocationPing.objects.filter(rider=rider)
+
+        raw_date = request.query_params.get('date')
+        raw_since = request.query_params.get('since')
+        if raw_since and not raw_date:
+            since = parse_datetime(raw_since)
+            if since is None:
+                return Response(
+                    {'detail': 'since must be an ISO timestamp.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if timezone.is_naive(since):
+                since = timezone.make_aware(since)
+            qs = qs.filter(recorded_at__gte=since)
+        else:
+            try:
+                day = (
+                    datetime.strptime(raw_date, '%Y-%m-%d').date()
+                    if raw_date else timezone.localdate()
+                )
+            except ValueError:
+                return Response(
+                    {'detail': 'date must be YYYY-MM-DD.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            # Local day boundaries: the pre-dawn delivery round belongs to the
+            # Pakistan calendar day, not the UTC one.
+            start = timezone.make_aware(datetime.combine(day, time.min))
+            qs = qs.filter(
+                recorded_at__gte=start, recorded_at__lt=start + timedelta(days=1),
+            )
+
+        total = qs.count()
+        limit, offset = _paginate(request, TRAIL_DEFAULT_LIMIT, TRAIL_MAX_LIMIT)
+        rows = qs.order_by('recorded_at')[offset:offset + limit]
+        return Response({
+            'count': total,
+            'results': RiderLocationPingSerializer(rows, many=True).data,
+            'limit': limit,
+            'offset': offset,
+        })
+
+
+class TrackingConfigView(APIView):
+    """
+    GET /api/auth/tracking-config/ — the tracking policy the app must obey.
+
+    Readable by any authenticated user: the app fetches it right after login,
+    before it necessarily knows whether this account is a rider.
+    """
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        return Response(TrackingSettingsSerializer(TrackingSettings.load()).data)

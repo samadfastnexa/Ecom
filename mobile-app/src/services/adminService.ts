@@ -629,6 +629,37 @@ export const adminService = {
       body: JSON.stringify({ reason }),
     });
   },
+
+  // ─── Rider tracking ───────────────────────────────────────────────────────
+  // Riders that have never reported are absent from the list entirely, which is
+  // a different thing from is_stale — they have no known position at all.
+
+  getRiderLocations(params: { limit?: number; offset?: number } = {}):
+    Promise<{ count: number; limit: number; offset: number; results: RiderLocation[] }> {
+    const sp = new URLSearchParams();
+    if (params.limit != null) sp.set('limit', String(params.limit));
+    if (params.offset != null) sp.set('offset', String(params.offset));
+    const qs = sp.toString();
+    return adminFetch(`/auth/admin/riders/locations/${qs ? `?${qs}` : ''}`);
+  },
+
+  /** `userId` is `rider_id` from the locations list, NOT `profile_id`. */
+  getRiderTrail(
+    userId: number,
+    params: { date?: string; since?: string; limit?: number; offset?: number } = {},
+  ): Promise<{ count: number; limit: number; offset: number; results: RiderTrailPoint[] }> {
+    const sp = new URLSearchParams();
+    if (params.date) sp.set('date', params.date);
+    if (params.since) sp.set('since', params.since);
+    if (params.limit != null) sp.set('limit', String(params.limit));
+    if (params.offset != null) sp.set('offset', String(params.offset));
+    const qs = sp.toString();
+    return adminFetch(`/auth/admin/riders/${userId}/trail/${qs ? `?${qs}` : ''}`);
+  },
+
+  getTrackingConfig(): Promise<TrackingConfig> {
+    return adminFetch('/auth/tracking-config/');
+  },
 };
 
 // ── Ledger types ─────────────────────────────────────────────────────────────
@@ -716,5 +747,64 @@ export interface LedgerSummary {
   entry_count: number;
   last_entry_date: string | null;
   last_payment: { date: string; amount: string; receipt_number: string | null } | null;
+}
+
+// ── Rider tracking types ─────────────────────────────────────────────────────
+
+/**
+ * How hard the app tracks a rider. Set from Django admin, not from here — it
+ * is the kill switch that changes behaviour without shipping a new build.
+ */
+export type TrackingMode = 'always' | 'active_delivery' | 'foreground';
+
+export interface TrackingConfig {
+  tracking_enabled: boolean;
+  tracking_mode: TrackingMode;
+  ping_interval_seconds: number;
+  ping_distance_meters: number;
+  trail_retention_days: number;
+  /** Server-owned staleness threshold — never hard-code a number instead. */
+  stale_after_minutes: number;
+  updated_at: string;
+}
+
+/**
+ * A rider's CURRENT pin. Note the two ids: `rider_id` is the Django user id and
+ * is what the trail endpoint takes, while `profile_id` is the UserProfile id
+ * used by the staff endpoints. They are different numbers for the same person.
+ *
+ * Coordinates arrive as JSON numbers (not DRF's usual quoted decimals) so they
+ * drop straight into a map coordinate without parsing.
+ */
+export interface RiderLocation {
+  rider_id: number;
+  profile_id: number;
+  username: string;
+  name: string;
+  phone: string | null;
+  vehicle_number: string | null;
+  is_available: boolean;
+  latitude: number;
+  longitude: number;
+  accuracy_m: number | null;
+  speed_kmh: number | null;
+  heading: number | null;
+  battery_level: number | null;
+  is_moving: boolean;
+  /** Device clock — what staleness and ordering are judged on. */
+  recorded_at: string;
+  /** Server clock — later than recorded_at after an offline flush. */
+  received_at: string;
+  is_stale: boolean;
+  minutes_ago: number;
+  active_orders: number;
+}
+
+export interface RiderTrailPoint {
+  id: number;
+  latitude: number;
+  longitude: number;
+  accuracy_m: number | null;
+  recorded_at: string;
 }
 
