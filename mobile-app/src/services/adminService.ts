@@ -22,6 +22,11 @@ export interface AdminOrder {
   total_price: number;
   status: string;
   shipping_address: string;
+  /** Snapshot of the map pin taken when the order was placed; 6dp strings. */
+  shipping_latitude: string | null;
+  shipping_longitude: string | null;
+  /** Which saved address it came from ("Home", "Shop", …); '' when unnamed. */
+  shipping_label: string;
   payment_method: string;
   payment_number: string | null;
   is_paid: boolean;
@@ -45,6 +50,9 @@ export interface AdminSummary {
   cancelled: number;
   paid_count: number;
   unpaid_count: number;
+  /** Revenue over the requested period; all-time when no range is sent. */
+  revenue: number;
+  /** Always literally today, whatever period is selected. */
   today_orders: number;
   today_revenue: number;
 }
@@ -59,7 +67,14 @@ export interface AdminCustomer {
   id: number;
   username: string;
   name: string;
+  /** Composed line, built server-side from the parts below. Send the parts and
+   *  let the server recompose it rather than writing this directly. */
   address: string | null;
+  house_number?: string | null;
+  /** Canonical portion key (`ground`, `first_floor`, …) or null. */
+  portion?: string | null;
+  block?: string | null;
+  area?: string | null;
   phone: string | null;
   price: number;
 }
@@ -173,6 +188,8 @@ export interface AdminCategory {
   slug?: string;
   /** Expo Vector Icons name (optional). */
   icon?: string;
+  /** Hidden categories stay on their existing products but are offered nowhere. */
+  is_active: boolean;
 }
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
@@ -216,8 +233,16 @@ async function adminFetch<T>(path: string, options: RequestInit = {}): Promise<T
 // ─── API ──────────────────────────────────────────────────────────────────────
 
 export const adminService = {
-  getSummary(): Promise<AdminSummary> {
-    return adminFetch('/orders/admin/summary/');
+  /**
+   * Headline stats. Passing a range scopes every figure to it; passing nothing
+   * keeps the all-time totals the dashboard showed before the period filter.
+   */
+  getSummary(params: { date_from?: string; date_to?: string } = {}): Promise<AdminSummary> {
+    const sp = new URLSearchParams();
+    if (params.date_from) sp.set('date_from', params.date_from);
+    if (params.date_to) sp.set('date_to', params.date_to);
+    const qs = sp.toString();
+    return adminFetch(`/orders/admin/summary/${qs ? `?${qs}` : ''}`);
   },
 
   getOrders(params: {
@@ -243,7 +268,12 @@ export const adminService = {
     user_id?: number | null;
     guest_name?: string;
     guest_phone?: string;
-    shipping_address: string;
+    /** Composed line; the backend rebuilds it from the parts when they are sent. */
+    shipping_address?: string;
+    house_number?: string;
+    portion?: string;
+    block?: string;
+    area?: string;
     payment_method: string;
     payment_number?: string;
     assigned_delivery_boy?: number | null;
@@ -289,11 +319,18 @@ export const adminService = {
     return adminFetch('/auth/admin/staff/');
   },
 
+  // Send the structured parts, not `address` — the server recomposes the line
+  // from them. Sending both makes the explicit `address` win and the parts
+  // silently disagree with it.
   updateCustomer(userId: number, data: {
     first_name?: string;
     last_name?: string;
     phone_number?: string;
     address?: string;
+    house_number?: string;
+    portion?: string;
+    block?: string;
+    area?: string;
   }): Promise<{ id: number; username: string; name: string; first_name: string; last_name: string; phone: string | null; address: string | null }> {
     return adminFetch(`/auth/admin/customers/${userId}/`, {
       method: 'PATCH',
@@ -301,15 +338,27 @@ export const adminService = {
     });
   },
 
+  /**
+   * Create an internal customer. `password` is optional: omitting it stores an
+   * unusable password, so the record exists for orders and the ledger but
+   * cannot be signed into until an admin sets one.
+   */
   createCustomer(payload: {
     username: string;
-    password: string;
+    password?: string;
     first_name?: string;
     last_name?: string;
     email?: string;
     phone_number?: string;
+    house_number?: string;
+    portion?: string;
+    block?: string;
+    area?: string;
     address?: string;
-  }): Promise<{ id: number; username: string; name: string; phone: string | null; address: string | null }> {
+  }): Promise<{
+    id: number; username: string; name: string;
+    phone: string | null; address: string | null; can_sign_in: boolean;
+  }> {
     return adminFetch('/auth/admin/customers/create/', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -537,18 +586,23 @@ export const adminService = {
     return adminFetch(`/products/${id}/`, { method: 'DELETE' });
   },
 
-  getCategories(): Promise<AdminCategory[]> {
-    return adminFetch('/categories/');
+  /**
+   * Staff get every category by default — that is deliberate, it is the only way
+   * the manager screen can reach a hidden one to switch it back on. Pass
+   * `{ active: true }` when the list is going to be offered as a choice.
+   */
+  getCategories(params: { active?: boolean } = {}): Promise<AdminCategory[]> {
+    return adminFetch(`/categories/${params.active ? '?active=true' : ''}`);
   },
 
-  createCategory(data: { name: string; icon?: string }): Promise<AdminCategory> {
+  createCategory(data: { name: string; icon?: string; is_active?: boolean }): Promise<AdminCategory> {
     return adminFetch('/categories/', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
-  updateCategory(id: number, data: { name?: string; icon?: string }): Promise<AdminCategory> {
+  updateCategory(id: number, data: { name?: string; icon?: string; is_active?: boolean }): Promise<AdminCategory> {
     return adminFetch(`/categories/${id}/`, {
       method: 'PATCH',
       body: JSON.stringify(data),
@@ -621,6 +675,40 @@ export const adminService = {
 
   deleteArea(id: number): Promise<void> {
     return adminFetch(`/auth/admin/areas/${id}/`, { method: 'DELETE' });
+  },
+
+  /**
+   * Delivery statuses a rider picks from when closing a drop.
+   *
+   * Typed as PricedType so the shared TypeList settings UI can render them —
+   * they carry no price, hence `showPrice={false}` at the call site. Their
+   * colours are edited in the web admin panel, which has proper colour pickers.
+   *
+   * Retiring one is `is_active: false`, not a delete: orders record the status
+   * by name, so removing the row would leave past deliveries labelled with
+   * something nothing can explain. The server refuses to delete one in use.
+   */
+  getDeliveryStatusOptions(): Promise<PricedType[]> {
+    return adminFetch('/orders/admin/delivery-statuses/');
+  },
+
+  createDeliveryStatusOption(name: string): Promise<PricedType> {
+    return adminFetch('/orders/admin/delivery-statuses/', {
+      method: 'POST', body: JSON.stringify({ name }),
+    });
+  },
+
+  updateDeliveryStatusOption(
+    id: number,
+    data: { name?: string; is_active?: boolean; order?: number },
+  ): Promise<PricedType> {
+    return adminFetch(`/orders/admin/delivery-statuses/${id}/`, {
+      method: 'PATCH', body: JSON.stringify(data),
+    });
+  },
+
+  deleteDeliveryStatusOption(id: number): Promise<void> {
+    return adminFetch(`/orders/admin/delivery-statuses/${id}/`, { method: 'DELETE' });
   },
 
   voidLedgerEntry(entryId: number, reason: string): Promise<LedgerEntry> {

@@ -505,6 +505,18 @@ export const AdminSettingsScreen: React.FC = () => (
       showPrice={false}
     />
 
+    <TypeList
+      title="Delivery Statuses"
+      icon="checkmark-done"
+      color="#34C759"
+      load={() => adminService.getDeliveryStatusOptions()}
+      create={n => adminService.createDeliveryStatusOption(n)}
+      update={(id, d) => adminService.updateDeliveryStatusOption(id, d)}
+      remove={id => adminService.deleteDeliveryStatusOption(id)}
+      namePlaceholder="e.g. Gate locked, Not responding"
+      showPrice={false}
+    />
+
     <MobileProfileSection />
   </ScrollView>
 );

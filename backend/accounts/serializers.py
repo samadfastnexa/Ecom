@@ -1,16 +1,20 @@
 import re
 from datetime import timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
+
+from core.address import normalize_portion
 from rest_framework.validators import UniqueValidator
 from .models import (
-    Area, UserProfile, NotificationTemplate,
-    LOCATION_STALE_AFTER_MINUTES, RiderLocation, RiderLocationPing, TrackingSettings,
+    Area, CustomerAddress, DiscountCategory, UserProfile, NotificationTemplate,
+    CUSTOMER_PIN_FIELDS, LOCATION_STALE_AFTER_MINUTES,
+    RiderLocation, RiderLocationPing, TrackingSettings,
 )
+from .permissions import user_can_override_discount
 
 
 class AreaSerializer(serializers.ModelSerializer):
@@ -33,6 +37,56 @@ class AreaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('That area already exists.')
         return value
 
+class DiscountCategorySerializer(serializers.ModelSerializer):
+    """Admin-managed customer discount tiers. Staff-only — customers never see these."""
+
+    customer_count = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = DiscountCategory
+        fields = (
+            'id', 'name', 'discount_type', 'discount_value', 'is_active',
+            'description', 'customer_count', 'created_at', 'updated_at',
+        )
+
+    def get_customer_count(self, obj):
+        return obj.customers.count()
+
+    def validate_name(self, value):
+        value = (value or '').strip()
+        if not value:
+            raise serializers.ValidationError('Category name is required.')
+        # Case-insensitive uniqueness, same reasoning as Area: "wholesale" and
+        # "Wholesale" are the same tier in a dropdown.
+        qs = DiscountCategory.objects.filter(name__iexact=value)
+        if self.instance:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError('That discount category already exists.')
+        return value
+
+    def validate_discount_value(self, value):
+        if value < 0:
+            raise serializers.ValidationError('Discount value cannot be negative.')
+        return value
+
+    def validate(self, attrs):
+        # MySQL/MariaDB may ignore CHECK constraints, so the percentage cap is
+        # enforced here, in Python.
+        discount_type = attrs.get(
+            'discount_type', getattr(self.instance, 'discount_type', DiscountCategory.FIXED)
+        )
+        discount_value = attrs.get(
+            'discount_value', getattr(self.instance, 'discount_value', None)
+        )
+        if (discount_type == DiscountCategory.PERCENTAGE
+                and discount_value is not None and discount_value > 100):
+            raise serializers.ValidationError(
+                {'discount_value': 'A percentage discount cannot exceed 100.'}
+            )
+        return attrs
+
+
 # Pakistani mobile numbers: 03xx-xxxxxxx, +923xxxxxxxxx or 923xxxxxxxxx
 _PHONE_SEPARATORS = re.compile(r'[\s\-().]')
 _PHONE_PATTERN = re.compile(r'^(?:\+92|92|0)3\d{9}$')
@@ -46,6 +100,62 @@ def normalize_phone_number(value):
             'Enter a valid mobile number, e.g. 0300-1234567.'
         )
     return '0' + cleaned[-10:]
+
+
+# ── Coordinates (shared by rider tracking and the customer delivery pin) ─────
+
+COORDINATE_QUANTUM = Decimal('0.000001')
+
+
+class _CoordinateField(serializers.DecimalField):
+    """
+    Takes whatever precision the GPS chip reports and rounds it to 6 dp.
+
+    Declaring decimal_places=6 here would 400 a perfectly good fix like
+    31.52037777 for being *too* precise, so precision is left open and the
+    value is quantized on the way in instead.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(max_digits=None, decimal_places=None, **kwargs)
+
+    def to_internal_value(self, data):
+        value = super().to_internal_value(data)
+        try:
+            return value.quantize(COORDINATE_QUANTUM, rounding=ROUND_HALF_UP)
+        except InvalidOperation:
+            # With max_digits open, an absurd exponent ("1E+400") or a
+            # 30-plus-digit integer survives the parent's parsing and blows up
+            # quantize instead — that is a bad request, not a server error.
+            self.fail('invalid')
+
+
+def _pin_coordinate(**kwargs):
+    """A customer-pin latitude/longitude input field with the range checked in
+    Python — MariaDB may ignore CHECK constraints, so this is the real guard."""
+    bound = kwargs.pop('bound')
+    return _CoordinateField(
+        min_value=Decimal(-bound), max_value=Decimal(bound), **kwargs
+    )
+
+
+def validate_pin_pair(attrs):
+    """A delivery pin only means anything as a complete pair — reject a lone
+    latitude whether the other half is missing or explicitly null."""
+    if (('customer_latitude' in attrs) != ('customer_longitude' in attrs)
+            or (attrs.get('customer_latitude') is None)
+            != (attrs.get('customer_longitude') is None)):
+        raise serializers.ValidationError({
+            'customer_location':
+                'Provide customer_latitude and customer_longitude together.'
+        })
+
+
+class CustomerLocationInputSerializer(serializers.Serializer):
+    """The pin a rider or staff member drops for a customer — both halves required."""
+
+    customer_latitude = _pin_coordinate(bound=90)
+    customer_longitude = _pin_coordinate(bound=180)
 
 
 class NotificationTemplateSerializer(serializers.ModelSerializer):
@@ -106,12 +216,26 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
     area = serializers.CharField(
         source='profile.area', allow_blank=True, allow_null=True, required=False
     )
+    work_place_label = serializers.CharField(
+        source='profile.work_place_label', allow_blank=True, required=False,
+        max_length=120,
+    )
+    # The customer's own delivery pin. No source=: pin writes go through
+    # set_customer_pin so source/set_by/set_at always move with the coordinates.
+    customer_latitude = _pin_coordinate(
+        bound=90, required=False, allow_null=True, write_only=True,
+    )
+    customer_longitude = _pin_coordinate(
+        bound=180, required=False, allow_null=True, write_only=True,
+    )
 
     class Meta:
         model = User
         fields = (
             'username', 'first_name', 'last_name', 'email', 'phone_number',
             'address', 'house_number', 'portion', 'block', 'area',
+            'work_place_label',
+            'customer_latitude', 'customer_longitude',
         )
         extra_kwargs = {
             'email': {'required': False},
@@ -119,12 +243,19 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
             'last_name': {'required': False},
         }
 
+    def validate(self, attrs):
+        validate_pin_pair(attrs)
+        return attrs
+
     def update(self, instance, validated_data):
         profile_data = validated_data.pop('profile', {})
+        has_pin = 'customer_latitude' in validated_data
+        latitude = validated_data.pop('customer_latitude', None)
+        longitude = validated_data.pop('customer_longitude', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
-        if profile_data:
+        if profile_data or has_pin:
             profile = instance.profile
             for attr, value in profile_data.items():
                 setattr(profile, attr, value)
@@ -134,6 +265,11 @@ class UpdateProfileSerializer(serializers.ModelSerializer):
                 k in profile_data for k in ('house_number', 'portion', 'block', 'area')
             ):
                 profile.sync_address()
+            if has_pin:
+                # Their own claim — null/null clears the pin entirely.
+                profile.set_customer_pin(
+                    latitude, longitude, source='customer', set_by=instance,
+                )
             profile.save()
         return instance
 
@@ -148,6 +284,73 @@ class ChangePasswordSerializer(serializers.Serializer):
         if not self.context['request'].user.check_password(value):
             raise serializers.ValidationError("Current password is incorrect.")
         return value
+
+
+# Character rules every password in the system must satisfy. Kept as data so
+# the signup serializer and the admin "add customer" endpoint enforce exactly
+# the same policy — those two used to disagree, with admin-created accounts
+# accepting a 6-character password and no character requirements at all.
+PASSWORD_RULES = (
+    (lambda p: len(p) >= 8, 'Password must be at least 8 characters.'),
+    (lambda p: any(c.isdigit() for c in p), 'Password must contain at least one digit.'),
+    (lambda p: any(c.isupper() for c in p), 'Password must contain at least one uppercase letter.'),
+    (lambda p: any(c.islower() for c in p), 'Password must contain at least one lowercase letter.'),
+    (lambda p: any(not c.isalnum() for c in p), 'Password must contain at least one special character.'),
+)
+
+
+def password_policy_error(password):
+    """Return the first unmet password rule, or None if the password passes."""
+    for passes, message in PASSWORD_RULES:
+        if not passes(password):
+            return message
+    return None
+
+
+class CustomerAddressSerializer(serializers.ModelSerializer):
+    """A customer's saved address, with its optional delivery pin."""
+
+    display_label = serializers.CharField(read_only=True)
+    has_pin = serializers.BooleanField(read_only=True)
+    # Plain string rather than the model's ChoiceField: an older client sending
+    # 'Ground Floor' should be normalised, not rejected outright on an optional
+    # field. validate_portion below maps it onto the canonical key.
+    portion = serializers.CharField(
+        required=False, allow_blank=True, default='', max_length=50,
+    )
+
+    class Meta:
+        model = CustomerAddress
+        fields = [
+            'id', 'label', 'custom_label', 'display_label',
+            'house_number', 'portion', 'block', 'area', 'address',
+            'latitude', 'longitude', 'has_pin',
+            'is_default', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'address', 'created_at', 'updated_at']
+
+    def validate_portion(self, value):
+        return normalize_portion(value)
+
+    def validate(self, attrs):
+        # A pin is a pair or nothing: half a coordinate puts a rider in the sea.
+        lat = attrs.get('latitude', getattr(self.instance, 'latitude', None))
+        lng = attrs.get('longitude', getattr(self.instance, 'longitude', None))
+        if (lat is None) != (lng is None):
+            raise serializers.ValidationError(
+                {'latitude': 'Send latitude and longitude together, or neither.'}
+            )
+
+        def value_for(field):
+            if field in attrs:
+                return (attrs.get(field) or '').strip()
+            return (getattr(self.instance, field, '') or '').strip()
+
+        if not value_for('house_number'):
+            raise serializers.ValidationError({'house_number': 'This field is required.'})
+        if not value_for('area'):
+            raise serializers.ValidationError({'area': 'This field is required.'})
+        return attrs
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -168,6 +371,13 @@ class RegisterSerializer(serializers.ModelSerializer):
         write_only=True, required=False, allow_blank=True, default='', max_length=100
     )
     area = serializers.CharField(write_only=True, required=True, max_length=150)
+    # Optional delivery pin dropped on the signup map.
+    customer_latitude = _pin_coordinate(
+        bound=90, required=False, allow_null=True, write_only=True,
+    )
+    customer_longitude = _pin_coordinate(
+        bound=180, required=False, allow_null=True, write_only=True,
+    )
 
     class Meta:
         model = User
@@ -175,6 +385,7 @@ class RegisterSerializer(serializers.ModelSerializer):
             'username', 'email', 'password', 'password_confirm',
             'first_name', 'last_name',
             'phone_number', 'house_number', 'portion', 'block', 'area',
+            'customer_latitude', 'customer_longitude',
         )
         extra_kwargs = {
             'first_name': {'required': False},
@@ -184,18 +395,21 @@ class RegisterSerializer(serializers.ModelSerializer):
     def validate_phone_number(self, value):
         return normalize_phone_number(value)
 
+    def validate_portion(self, value):
+        """Accept any spelling, store the canonical key.
+
+        Not a strict ChoiceField: an older client sending 'Ground' should still
+        register successfully rather than 400 on an optional field.
+        """
+        return normalize_portion(value)
+
     def validate(self, attrs):
+        validate_pin_pair(attrs)
         if attrs['password'] != attrs['password_confirm']:
             raise serializers.ValidationError({"password": "Password fields didn't match."})
-        password = attrs['password']
-        if not any(char.isdigit() for char in password):
-            raise serializers.ValidationError({"password": "Password must contain at least one digit."})
-        if not any(char.isupper() for char in password):
-            raise serializers.ValidationError({"password": "Password must contain at least one uppercase letter."})
-        if not any(char.islower() for char in password):
-            raise serializers.ValidationError({"password": "Password must contain at least one lowercase letter."})
-        if not any(not char.isalnum() for char in password):
-            raise serializers.ValidationError({"password": "Password must contain at least one special character."})
+        policy_error = password_policy_error(attrs['password'])
+        if policy_error:
+            raise serializers.ValidationError({"password": policy_error})
         return attrs
 
     def create(self, validated_data):
@@ -216,10 +430,18 @@ class RegisterSerializer(serializers.ModelSerializer):
         profile.block = (validated_data.get('block') or '').strip()
         profile.area = validated_data['area'].strip()
         profile.sync_address()
-        profile.save(update_fields=[
+        update_fields = [
             'user_type', 'phone_number', 'house_number', 'portion',
             'block', 'area', 'address',
-        ])
+        ]
+        if validated_data.get('customer_latitude') is not None:
+            profile.set_customer_pin(
+                validated_data['customer_latitude'],
+                validated_data['customer_longitude'],
+                source='customer', set_by=user,
+            )
+            update_fields += CUSTOMER_PIN_FIELDS
+        profile.save(update_fields=update_fields)
         return user
 
 
@@ -442,7 +664,18 @@ class UserSerializer(serializers.ModelSerializer):
     portion = serializers.CharField(source='profile.portion', read_only=True)
     block = serializers.CharField(source='profile.block', read_only=True)
     area = serializers.CharField(source='profile.area', read_only=True)
+    work_place_label = serializers.CharField(source='profile.work_place_label', read_only=True)
     is_available = serializers.BooleanField(source='profile.is_available', read_only=True)
+    # Their OWN delivery pin — numbers, not strings, for a Google Maps
+    # LatLngLiteral. Other customers' pins are never reachable from here.
+    customer_latitude = serializers.DecimalField(
+        source='profile.customer_latitude', max_digits=9, decimal_places=6,
+        coerce_to_string=False, read_only=True,
+    )
+    customer_longitude = serializers.DecimalField(
+        source='profile.customer_longitude', max_digits=10, decimal_places=6,
+        coerce_to_string=False, read_only=True,
+    )
     vehicle_type = serializers.CharField(source='profile.vehicle_type', read_only=True)
     vehicle_number = serializers.CharField(source='profile.vehicle_number', read_only=True)
     account_balance = serializers.DecimalField(
@@ -450,6 +683,7 @@ class UserSerializer(serializers.ModelSerializer):
     )
     is_staff = serializers.BooleanField(read_only=True)
     can_manage_plant = serializers.SerializerMethodField()
+    can_override_discount = serializers.SerializerMethodField()
     # Staff / rider HR fields (null for customers)
     employee_id = serializers.CharField(source='profile.employee_id', read_only=True)
     designation = serializers.CharField(source='profile.designation', read_only=True)
@@ -468,12 +702,15 @@ class UserSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'username', 'email', 'first_name', 'last_name',
             'user_type', 'phone_number', 'address',
-            'house_number', 'portion', 'block', 'area', 'is_available',
+            'house_number', 'portion', 'block', 'area', 'work_place_label',
+            'customer_latitude', 'customer_longitude', 'is_available',
             'vehicle_type', 'vehicle_number', 'account_balance',
-            'is_staff', 'can_manage_plant',
+            'is_staff', 'can_manage_plant', 'can_override_discount',
             'employee_id', 'designation', 'department', 'emergency_contact',
             'cnic_number', 'date_of_birth', 'date_of_joining', 'salary', 'remarks',
         )
+        # NOTE: profile.discount_category is deliberately absent — a customer
+        # must never learn their discount assignment from their own profile.
 
     def get_can_manage_plant(self, obj):
         return (
@@ -482,10 +719,11 @@ class UserSerializer(serializers.ModelSerializer):
             or obj.has_perm('plant.view_deliveryrecord')
         )
 
+    def get_can_override_discount(self, obj):
+        return user_can_override_discount(obj)
+
 
 # ── Rider location tracking ──────────────────────────────────────────────────
-
-COORDINATE_QUANTUM = Decimal('0.000001')
 
 # A device clock a little ahead of ours is normal; hours ahead is a broken clock
 # that would otherwise pin the rider in the future and keep them forever fresh.
@@ -499,24 +737,6 @@ def _unknown_if_negative(value):
     so a negative reading is stored as "unknown" instead.
     """
     return None if value is None or value < 0 else value
-
-
-class _CoordinateField(serializers.DecimalField):
-    """
-    Takes whatever precision the GPS chip reports and rounds it to 6 dp.
-
-    Declaring decimal_places=6 here would 400 a perfectly good fix like
-    31.52037777 for being *too* precise, so precision is left open and the
-    value is quantized on the way in instead.
-    """
-
-    def __init__(self, **kwargs):
-        super().__init__(max_digits=None, decimal_places=None, **kwargs)
-
-    def to_internal_value(self, data):
-        return super().to_internal_value(data).quantize(
-            COORDINATE_QUANTUM, rounding=ROUND_HALF_UP
-        )
 
 
 class RiderLocationPingInputSerializer(serializers.Serializer):
@@ -552,6 +772,17 @@ class RiderLocationPingInputSerializer(serializers.Serializer):
     def validate_recorded_at(self, value):
         if value > timezone.now() + CLOCK_SKEW_TOLERANCE:
             raise serializers.ValidationError('recorded_at is in the future.')
+        # Anything past the retention window would be pruned on arrival anyway,
+        # and a badly wrong device clock must not be able to smear a trail
+        # backwards through history. Cached on the serializer: with many=True
+        # one child instance validates the whole batch.
+        if not hasattr(self, '_oldest_accepted'):
+            retention = TrackingSettings.load().trail_retention_days
+            self._oldest_accepted = timezone.now() - timedelta(days=retention)
+        if value < self._oldest_accepted:
+            raise serializers.ValidationError(
+                'recorded_at is older than the trail retention window.'
+            )
         return value
 
     def validate(self, attrs):
@@ -651,7 +882,10 @@ class RiderLocationPingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RiderLocationPing
-        fields = ['id', 'latitude', 'longitude', 'accuracy_m', 'recorded_at']
+        # created_at alongside recorded_at: an offline flush arrives long after
+        # the fix was taken, and admins need to see both clocks to tell a stale
+        # queue from live reporting.
+        fields = ['id', 'latitude', 'longitude', 'accuracy_m', 'recorded_at', 'created_at']
 
 
 class TrackingSettingsSerializer(serializers.ModelSerializer):

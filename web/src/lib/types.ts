@@ -5,6 +5,12 @@ export interface Category {
   name: string;
   slug: string;
   icon: string;
+  /**
+   * Hidden categories (`false`) are retired rather than deleted: products
+   * already filed under one keep it, but customers never see it. The server
+   * hides them from non-staff callers; staff get every category by default.
+   */
+  is_active: boolean;
 }
 
 export interface ImageRef {
@@ -57,6 +63,16 @@ export interface Order {
   total_price: string;
   status: OrderStatus;
   shipping_address: string;
+  /** Structured copy of the address, snapshotted when the order was placed. */
+  house_number?: string;
+  portion?: string;
+  block?: string;
+  area?: string;
+  /** Delivery pin, as decimal strings. Null when the customer never dropped one. */
+  shipping_latitude?: string | null;
+  shipping_longitude?: string | null;
+  /** Resolved name of the address book entry used ("Home", "Warehouse", …). */
+  shipping_label?: string | null;
   payment_method: PaymentMethod;
   payment_number?: string | null;
   is_paid: boolean;
@@ -107,6 +123,49 @@ export interface UserProfile {
   account_balance: string; // decimal string from API, positive = credit, negative = owes
   is_staff: boolean;
   can_manage_plant: boolean;
+}
+
+/* ---------- Customer address book ---------- */
+
+/** Fixed set the backend stores; `other` is named by `custom_label`. */
+export type AddressLabel = "home" | "office" | "shop" | "warehouse" | "other";
+
+export interface CustomerAddress {
+  id: number;
+  label: AddressLabel;
+  custom_label: string;
+  /** Resolved name — `custom_label` when the label is "other", else its display text. */
+  display_label: string;
+  house_number: string;
+  /** Canonical PORTION_OPTIONS key (e.g. "first_floor"), not free text. */
+  portion: string;
+  block: string;
+  area: string;
+  /** Composed by the server from the parts above — read-only, never sent back. */
+  address: string;
+  /** Delivery pin as decimal strings, or null when none was dropped. */
+  latitude: string | null;
+  longitude: string | null;
+  has_pin: boolean;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerAddressInput {
+  label?: AddressLabel;
+  custom_label?: string;
+  house_number: string;
+  portion?: string;
+  block?: string;
+  area: string;
+  /**
+   * The pin must travel as a pair — sending one half without the other is a
+   * 400. Send both as `null` to clear it.
+   */
+  latitude?: string | null;
+  longitude?: string | null;
+  is_default?: boolean;
 }
 
 /* ---------- Plant management ---------- */
@@ -246,6 +305,8 @@ export interface RegisterPayload {
   phone_number: string;
   /** Structured delivery address — the backend composes these into `address`. */
   house_number: string;
+  /** One of the canonical keys in PORTION_OPTIONS (e.g. "first_floor"), not
+   *  free text — the backend composes the matching label into `address`. */
   portion?: string;
   block?: string;
   area: string;
@@ -274,7 +335,14 @@ export interface CreateOrderItemInput {
 export interface CreateOrderPayload {
   items: CreateOrderItemInput[];
   total_price: string;
-  shipping_address: string;
+  /**
+   * A saved address book entry. The server copies its text, parts and pin onto
+   * the order, so `shipping_address` need not be sent alongside it. Sending
+   * neither this nor `shipping_address` is rejected.
+   */
+  address_id?: number;
+  /** Free-text fallback for a customer checking out without a saved address. */
+  shipping_address?: string;
   payment_method: PaymentMethod;
   payment_number?: string | null;
 }
@@ -303,6 +371,9 @@ export interface AdminOrderSummary {
   cancelled: number;
   paid_count: number;
   unpaid_count: number;
+  /** Revenue over the requested period; all-time when no range is sent. */
+  revenue: number;
+  /** Always literally today, whatever period is selected. */
   today_orders: number;
   today_revenue: number;
 }
@@ -340,7 +411,14 @@ export interface CreateAdminOrderPayload {
   user_id?: number | null;
   guest_name?: string;
   guest_phone?: string;
-  shipping_address: string;
+  /** Composed line. Optional when the structured parts below are sent — the
+   *  backend rebuilds it from them, exactly as signup does. */
+  shipping_address?: string;
+  house_number?: string;
+  /** Canonical PORTION_OPTIONS key, not free text. */
+  portion?: string;
+  block?: string;
+  area?: string;
   payment_method: PaymentMethod;
   payment_number?: string;
   assigned_delivery_boy?: number | null;
@@ -371,19 +449,43 @@ export interface AdminCustomer {
   last_name: string;
   email: string;
   phone: string | null;
+  /** Composed line, built by the server from the parts below. Read-only in
+   *  practice — send the parts and let the server recompose it. */
   address: string | null;
+  house_number: string | null;
+  /** Canonical portion key (`ground`, `first_floor`, …) or null. */
+  portion: string | null;
+  block: string | null;
+  area: string | null;
   date_joined: string;
   is_active: boolean;
 }
 
 export interface CreateCustomerPayload {
   username: string;
-  password: string;
+  /** Optional for internal customers. Omitting it stores an unusable password:
+   *  the record works for orders and the ledger but cannot be signed into
+   *  until an admin sets one. */
+  password?: string;
   first_name?: string;
   last_name?: string;
   email?: string;
   phone_number?: string;
+  house_number?: string;
+  /** Canonical PORTION_OPTIONS key, not free text. */
+  portion?: string;
+  block?: string;
+  area?: string;
   address?: string;
+}
+
+export interface CreatedCustomer {
+  id: number;
+  username: string;
+  name: string;
+  phone: string | null;
+  address: string | null;
+  can_sign_in: boolean;
 }
 
 export type WorkingStatus = 'Active' | 'Inactive' | 'Resigned' | 'Terminated' | 'On Leave';
@@ -650,6 +752,31 @@ export interface LedgerSummary {
     amount: string;
     receipt_number: string | null;
   } | null;
+}
+
+/** Business identity from `/ledger/business/` — the same record printed on
+ *  receipts. Only `share_location_label` is editable over the API; the rest is
+ *  managed in the Django admin. */
+export interface BusinessInfo {
+  name: string;
+  phone: string | null;
+  address: string | null;
+  /** Default name attached when an admin shares a work-place location. Blank
+   *  means "<name> — work place". */
+  share_location_label: string;
+}
+
+/** A delivery status as staff manage it, colours and all. */
+export interface AdminDeliveryStatus {
+  id: number;
+  name: string;
+  /** 6-digit hex, e.g. #2ecc71. */
+  color: string;
+  background_color: string;
+  border_color: string;
+  order: number;
+  /** Retired statuses stay on past orders but leave the rider's picker. */
+  is_active: boolean;
 }
 
 export interface Receivable {

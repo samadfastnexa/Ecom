@@ -6,6 +6,7 @@ import { Button, Card, PageHeader, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import type { AdminCustomer } from "@/lib/types";
 import { useCustomers } from "../hooks/useCustomers";
+import { matchesCustomerSearch } from "../search";
 import { AddCustomerModal } from "./AddCustomerModal";
 import { CustomerDetailModal } from "./CustomerDetailModal";
 
@@ -147,16 +148,9 @@ export function CustomersPage() {
       if (!c.address) return false;
     }
 
-    // Search filter
-    if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return (
-      c.name.toLowerCase().includes(q) ||
-      c.username.toLowerCase().includes(q) ||
-      (c.email ?? "").toLowerCase().includes(q) ||
-      (c.phone ?? "").includes(q) ||
-      (c.address ?? "").toLowerCase().includes(q)
-    );
+    // Search filter — multi-word, digit-tolerant on phones, and aware of the
+    // structured address parts. Same rules as the server's search.
+    return matchesCustomerSearch(c, search);
   });
 
   const filterLabel: Record<ActiveFilter, string> = {

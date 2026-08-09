@@ -1,5 +1,10 @@
 import { apiFetch } from "./client";
-import type { AdminCustomer, CreateCustomerPayload, CustomerOrderStats } from "../types";
+import type {
+  AdminCustomer,
+  CreateCustomerPayload,
+  CreatedCustomer,
+  CustomerOrderStats,
+} from "../types";
 
 export const customersApi = {
   list(search?: string): Promise<AdminCustomer[]> {
@@ -11,8 +16,8 @@ export const customersApi = {
     return apiFetch<AdminCustomer>(`/auth/admin/customers/${userId}/`, { auth: true });
   },
 
-  create(payload: CreateCustomerPayload): Promise<AdminCustomer> {
-    return apiFetch<AdminCustomer>("/auth/admin/customers/create/", {
+  create(payload: CreateCustomerPayload): Promise<CreatedCustomer> {
+    return apiFetch<CreatedCustomer>("/auth/admin/customers/create/", {
       method: "POST",
       auth: true,
       body: payload,
@@ -21,7 +26,20 @@ export const customersApi = {
 
   update(
     userId: number,
-    payload: { phone_number?: string | null; address?: string | null; first_name?: string; last_name?: string; is_active?: boolean }
+    // Send the structured parts, not `address` — the server recomposes the
+    // line from them. Sending both makes the explicit `address` win and the
+    // parts silently disagree with it.
+    payload: {
+      phone_number?: string | null;
+      address?: string | null;
+      house_number?: string | null;
+      portion?: string | null;
+      block?: string | null;
+      area?: string | null;
+      first_name?: string;
+      last_name?: string;
+      is_active?: boolean;
+    }
   ): Promise<AdminCustomer> {
     return apiFetch<AdminCustomer>(`/auth/admin/customers/${userId}/`, {
       method: "PATCH",

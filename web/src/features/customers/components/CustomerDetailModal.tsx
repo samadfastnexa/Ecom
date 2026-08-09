@@ -2,10 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Phone, MapPin, Calendar, Package, Droplets, TrendingUp, Wallet, ShieldCheck, ShieldOff, BookOpen, MessageCircle } from "lucide-react";
+import { Phone, Calendar, Package, Droplets, TrendingUp, Wallet, ShieldCheck, ShieldOff, BookOpen, MessageCircle } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
+import {
+  AddressFields,
+  EMPTY_ADDRESS,
+  composeAddress,
+  hasAddressInput,
+  splitAddress,
+  validateAddress,
+  type AddressErrors,
+  type AddressParts,
+} from "@/components/ui";
 import { customersApi } from "@/lib/api";
 import { balanceReminderMessage, canWhatsApp, openWhatsApp } from "@/lib/whatsapp";
 import type { AdminCustomer, CustomerOrderStats } from "@/lib/types";
@@ -34,7 +44,8 @@ export function CustomerDetailModal({ customer, onClose, onUpdated }: Props) {
   const [statsLoading, setStatsLoading] = useState(false);
 
   const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
+  const [address, setAddress] = useState<AddressParts>(EMPTY_ADDRESS);
+  const [addressErrors, setAddressErrors] = useState<AddressErrors>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [toggling, setToggling] = useState(false);
@@ -42,7 +53,20 @@ export function CustomerDetailModal({ customer, onClose, onUpdated }: Props) {
   useEffect(() => {
     if (!customer) return;
     setPhone(customer.phone ?? "");
-    setAddress(customer.address ?? "");
+    // Prefer the stored parts. Records created before the split have none, so
+    // fall back to picking the old one-line address apart — otherwise editing
+    // a legacy customer would silently blank their address.
+    setAddress(
+      customer.house_number || customer.area || customer.block || customer.portion
+        ? {
+            house_number: customer.house_number ?? "",
+            portion: customer.portion ?? "",
+            block: customer.block ?? "",
+            area: customer.area ?? "",
+          }
+        : splitAddress(customer.address),
+    );
+    setAddressErrors({});
     setSaveError("");
     setStatsLoading(true);
     customersApi.stats(customer.id)
@@ -53,15 +77,33 @@ export function CustomerDetailModal({ customer, onClose, onUpdated }: Props) {
 
   if (!customer) return null;
 
-  const changed = phone !== (customer.phone ?? "") || address !== (customer.address ?? "");
+  // Compare on the composed line: that is what the server stores, so an edit
+  // that only reshuffles the parts into the same address is genuinely no change.
+  const changed =
+    phone !== (customer.phone ?? "") ||
+    composeAddress(address) !== (customer.address ?? "");
 
   const save = async () => {
+    // An address is optional, but a half-filled one is not — without a house
+    // number and an area a rider has nowhere to go.
+    const wantsAddress = hasAddressInput(address);
+    const issues = wantsAddress ? validateAddress(address) : {};
+    setAddressErrors(issues);
+    if (Object.keys(issues).length > 0) {
+      setSaveError("Complete the address, or clear every part of it.");
+      return;
+    }
+
     setSaveError("");
     setSaving(true);
     try {
+      // Only the parts go up; the server recomposes `address` from them.
       await customersApi.update(customer.id, {
         phone_number: phone.trim() || null,
-        address: address.trim() || null,
+        house_number: wantsAddress ? address.house_number.trim() : "",
+        portion: wantsAddress ? address.portion.trim() : "",
+        block: wantsAddress ? address.block.trim() : "",
+        area: wantsAddress ? address.area.trim() : "",
       });
       onUpdated();
       onClose();
@@ -155,18 +197,12 @@ export function CustomerDetailModal({ customer, onClose, onUpdated }: Props) {
             onChange={(e) => setPhone(e.target.value)}
           />
         </div>
-        <div>
-          <label className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-mist/50">
-            <MapPin size={11} /> Address
-          </label>
-          <textarea
-            className="input w-full resize-none text-sm"
-            rows={2}
-            placeholder="House #, Street, Area"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-          />
-        </div>
+        <AddressFields
+          value={address}
+          onChange={setAddress}
+          errors={addressErrors}
+          required={false}
+        />
       </div>
 
       {saveError && (

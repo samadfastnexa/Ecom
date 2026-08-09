@@ -1,6 +1,9 @@
+import re
 from datetime import datetime, time, timedelta
+from decimal import Decimal
 
-from rest_framework import generics
+from rest_framework import generics, viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated, BasePermission
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
@@ -8,22 +11,32 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth.models import User
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
 from django.shortcuts import get_object_or_404
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Sum, Value
+from django.db.models.functions import Coalesce, Replace
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+
+from core.timeframes import scope_to_days
+from core.address import normalize_portion
 from .serializers import (
-    AreaSerializer, RegisterSerializer, UserSerializer,
+    AreaSerializer, DiscountCategorySerializer, RegisterSerializer, UserSerializer,
     UpdateProfileSerializer, ChangePasswordSerializer,
     StaffProfileSerializer, CreateStaffSerializer, UpdateStaffSerializer,
     NotificationTemplateSerializer,
+    CustomerLocationInputSerializer,
     RiderLocationEchoSerializer, RiderLocationPingInputSerializer,
     RiderLocationPingSerializer, RiderLocationSerializer,
     TrackingSettingsSerializer,
+    CustomerAddressSerializer,
+    password_policy_error,
 )
 from .models import (
-    Area, UserProfile, MobileProfileConfig, PROFILE_FIELD_DEFAULTS,
+    Area, CustomerAddress,
+    DiscountCategory, UserProfile, MobileProfileConfig, PROFILE_FIELD_DEFAULTS,
     NotificationTemplate, RiderLocation, RiderLocationPing, TrackingSettings,
+    CUSTOMER_PIN_FIELDS,
 )
 from activities.service import log as activity_log
 
@@ -61,6 +74,138 @@ class AdminAreaDetailView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = (IsStaff,)
     serializer_class = AreaSerializer
     queryset = Area.objects.all()
+
+
+# ─── Customer discount categories (staff-only, no public counterpart) ─────────
+
+class AdminDiscountCategoryListCreateView(generics.ListCreateAPIView):
+    """Staff-managed discount tiers. Deliberately has NO customer-facing list."""
+    permission_classes = (IsStaff,)
+    serializer_class = DiscountCategorySerializer
+    queryset = DiscountCategory.objects.all()
+    pagination_class = None
+
+
+class AdminDiscountCategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = (IsStaff,)
+    serializer_class = DiscountCategorySerializer
+    queryset = DiscountCategory.objects.all()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        try:
+            instance.delete()
+        except ProtectedError:
+            # PROTECT on UserProfile.discount_category: deleting must fail
+            # loudly, never silently strip customers of their discount.
+            count = instance.customers.count()
+            return Response(
+                {'detail': f'Cannot delete "{instance.name}": {count} customer(s) '
+                           'are still assigned to it. Reassign them first, or '
+                           'deactivate the category instead.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DiscountReportView(APIView):
+    """
+    Per-category discount totals for a date range — the "revenue forgone"
+    report. Staff only. ?start=YYYY-MM-DD&end=YYYY-MM-DD plus limit/offset;
+    orders count by their creation date, plant records by their record date.
+    """
+    permission_classes = [IsStaff]
+
+    DEFAULT_LIMIT = 100
+    MAX_LIMIT = 500
+
+    @staticmethod
+    def _parse_date(raw):
+        if not raw:
+            return None
+        try:
+            return datetime.strptime(raw, '%Y-%m-%d').date()
+        except ValueError:
+            return None
+
+    def get(self, request):
+        from orders.models import Order
+        from plant.models import DeliveryRecord
+
+        p = request.query_params
+        start = self._parse_date(p.get('start'))
+        end = self._parse_date(p.get('end'))
+
+        # Only rows that actually gave a discount count as "discounted".
+        # Cancelled orders are excluded — their charge was reversed, so the
+        # discount was never really given.
+        orders = Order.objects.filter(
+            discount_category__isnull=False, discount_amount__gt=0,
+        ).exclude(status='Cancelled')
+        records = DeliveryRecord.objects.filter(
+            discount_category__isnull=False, discount_amount__gt=0,
+        )
+        # DeliveryRecord.date is a plain DateField, so it compares directly;
+        # Order.created_at is an aware datetime and needs the day bounds.
+        orders = scope_to_days(orders, 'created_at', start, end)
+        if start:
+            records = records.filter(date__gte=start)
+        if end:
+            records = records.filter(date__lte=end)
+
+        def _by_category(qs, net_field):
+            return {
+                row['discount_category_id']: row
+                for row in qs.values('discount_category_id').annotate(
+                    n=Count('id'),
+                    gross=Sum('gross_amount'),
+                    discount=Sum('discount_amount'),
+                    net=Sum(net_field),
+                )
+            }
+
+        order_rows = _by_category(orders, 'total_price')
+        record_rows = _by_category(records, 'amount')
+        assigned = {
+            row['discount_category_id']: row['n']
+            for row in UserProfile.objects.filter(discount_category__isnull=False)
+            .values('discount_category_id').annotate(n=Count('id'))
+        }
+
+        zero = Decimal('0')
+        results = []
+        for category in DiscountCategory.objects.all():
+            o = order_rows.get(category.pk)
+            r = record_rows.get(category.pk)
+            gross = (o['gross'] if o else zero) + (r['gross'] if r else zero)
+            discount = (o['discount'] if o else zero) + (r['discount'] if r else zero)
+            net = (o['net'] if o else zero) + (r['net'] if r else zero)
+            results.append({
+                'id': category.pk,
+                'name': category.name,
+                'discount_type': category.discount_type,
+                'discount_value': str(category.discount_value),
+                'is_active': category.is_active,
+                'customers_assigned': assigned.get(category.pk, 0),
+                'orders_discounted': o['n'] if o else 0,
+                'records_discounted': r['n'] if r else 0,
+                'gross': str(gross),
+                'discount_given': str(discount),
+                'net': str(net),
+            })
+
+        try:
+            limit = min(int(p.get('limit', self.DEFAULT_LIMIT)), self.MAX_LIMIT)
+            offset = max(int(p.get('offset', 0)), 0)
+        except (TypeError, ValueError):
+            limit, offset = self.DEFAULT_LIMIT, 0
+
+        return Response({
+            'count': len(results),
+            'limit': limit,
+            'offset': offset,
+            'results': results[offset:offset + limit],
+        })
 
 
 class RegisterView(generics.CreateAPIView):
@@ -212,6 +357,66 @@ class AdminStaffHistoryView(APIView):
         return Response(AdminOrderSerializer(orders, many=True, context={'request': request}).data)
 
 
+def _customer_address_payload(profile):
+    """The structured address parts alongside the composed line.
+
+    Both are sent: `address` is what search, PDFs and the rider app read, while
+    the parts are what an edit form has to put back into its inputs. Deriving
+    the parts client-side by splitting the line only works for records saved
+    since the split existed.
+    """
+    return {
+        'house_number': profile.house_number,
+        'portion': profile.portion,
+        'block': profile.block,
+        'area': profile.area,
+    }
+
+
+def _customer_pin_payload(profile):
+    """The delivery pin as staff and rider payloads carry it — coordinates as
+    JSON numbers (Google Maps LatLngLiteral), plus whose claim the pin is."""
+    return {
+        'customer_latitude': (
+            float(profile.customer_latitude)
+            if profile.customer_latitude is not None else None
+        ),
+        'customer_longitude': (
+            float(profile.customer_longitude)
+            if profile.customer_longitude is not None else None
+        ),
+        'location_source': profile.location_source,
+        'location_set_at': (
+            profile.location_set_at.isoformat()
+            if profile.location_set_at else None
+        ),
+    }
+
+
+def _customer_search_q(term):
+    """Everything one search word may match on a customer record."""
+    q = (
+        Q(user__username__icontains=term) |
+        Q(user__first_name__icontains=term) |
+        Q(user__last_name__icontains=term) |
+        Q(user__email__icontains=term) |
+        Q(phone_number__icontains=term) |
+        Q(address__icontains=term) |
+        # The structured parts as well as the composed line: an address saved
+        # before the split existed only has `address`, and one saved after may
+        # have parts the composed line abbreviates.
+        Q(house_number__icontains=term) |
+        Q(block__icontains=term) |
+        Q(area__icontains=term)
+    )
+    # Phone numbers get written 0300-1234567, 0300 1234567, +923001234567.
+    # Comparing digits-only means any of those spellings finds the record.
+    digits = re.sub(r'\D', '', term)
+    if len(digits) >= 3:
+        q |= Q(phone_digits__contains=digits)
+    return q
+
+
 class AdminCustomerListView(APIView):
     """List all registered customers (user_type=customer) with optional search."""
     permission_classes = [IsStaff]
@@ -221,18 +426,29 @@ class AdminCustomerListView(APIView):
         qs = (
             UserProfile.objects
             .filter(user_type='customer')
-            .select_related('user')
+            .select_related('user', 'discount_category')
             .order_by('user__first_name', 'user__username')
         )
         if q:
-            qs = qs.filter(
-                Q(user__username__icontains=q) |
-                Q(user__first_name__icontains=q) |
-                Q(user__last_name__icontains=q) |
-                Q(user__email__icontains=q) |
-                Q(phone_number__icontains=q) |
-                Q(address__icontains=q)
+            # Strip the punctuation people type into phone numbers so it can be
+            # matched digit-for-digit, whatever separators the record uses.
+            qs = qs.annotate(
+                phone_digits=Replace(
+                    Replace(
+                        Replace(
+                            Replace(Coalesce('phone_number', Value('')),
+                                    Value('-'), Value('')),
+                            Value(' '), Value('')),
+                        Value('('), Value('')),
+                    Value(')'), Value(''),
+                ),
             )
+            # Every word must match something, but not necessarily the same
+            # thing — "ali johar" finds Ali in Johar Town, which a single
+            # icontains over the whole phrase never would.
+            for term in q.split():
+                qs = qs.filter(_customer_search_q(term))
+            qs = qs.distinct()
         data = []
         for profile in qs:
             u = profile.user
@@ -245,8 +461,15 @@ class AdminCustomerListView(APIView):
                 'email': u.email,
                 'phone': profile.phone_number,
                 'address': profile.address,
+                **_customer_address_payload(profile),
                 'date_joined': u.date_joined.isoformat(),
                 'is_active': u.is_active,
+                'discount_category': profile.discount_category_id,
+                'discount_category_name': (
+                    profile.discount_category.name
+                    if profile.discount_category_id else None
+                ),
+                **_customer_pin_payload(profile),
             })
         return Response(data)
 
@@ -266,8 +489,15 @@ class AdminCustomerDetailView(APIView):
             'email': user.email,
             'phone': profile.phone_number,
             'address': profile.address,
+            **_customer_address_payload(profile),
             'date_joined': user.date_joined.isoformat(),
             'is_active': user.is_active,
+            'discount_category': profile.discount_category_id,
+            'discount_category_name': (
+                profile.discount_category.name
+                if profile.discount_category_id else None
+            ),
+            **_customer_pin_payload(profile),
         }
 
     def get(self, request, user_id):
@@ -295,6 +525,38 @@ class AdminCustomerDetailView(APIView):
         if 'address' in data:
             profile.address = (data['address'] or '').strip() or None
             changed_profile.append('address')
+        # Structured address parts. Portion is normalised because the picker
+        # sends a key ('first_floor') but older records and imports carry the
+        # label ('1st Floor'), and only one of those groups or reports.
+        for field in ('house_number', 'block', 'area'):
+            if field in data:
+                setattr(profile, field, (data[field] or '').strip() or None)
+                changed_profile.append(field)
+        if 'portion' in data:
+            profile.portion = normalize_portion(data['portion']) or None
+            changed_profile.append('portion')
+        # Rebuild the composed line the rest of the system reads, unless the
+        # caller sent one explicitly — same rule as the customer's own profile
+        # update, so an admin edit and a self-edit cannot disagree.
+        if 'address' not in data and any(
+            f in data for f in ('house_number', 'portion', 'block', 'area')
+        ):
+            profile.sync_address()
+            changed_profile.append('address')
+        old_category = profile.discount_category
+        if 'discount_category' in data:
+            raw = data['discount_category']
+            if raw in (None, ''):
+                profile.discount_category = None
+            else:
+                try:
+                    profile.discount_category = DiscountCategory.objects.get(pk=raw)
+                except (DiscountCategory.DoesNotExist, TypeError, ValueError):
+                    return Response(
+                        {'discount_category': 'Unknown discount category.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            changed_profile.append('discount_category')
         if changed_profile:
             profile.save(update_fields=changed_profile)
         activity_log(
@@ -302,28 +564,151 @@ class AdminCustomerDetailView(APIView):
             target_type='customer', target_id=user.id,
             target_label=user.get_full_name() or user.username,
         )
+        new_category = profile.discount_category
+        if 'discount_category' in data and new_category != old_category:
+            # Assignment changes future billing, so it gets its own audit row.
+            activity_log(
+                request.user, 'customer', 'Discount Category Assigned',
+                target_type='customer', target_id=user.id,
+                target_label=user.get_full_name() or user.username,
+                details={
+                    'from': old_category.name if old_category else None,
+                    'to': new_category.name if new_category else None,
+                },
+            )
         return Response(self._serialize(user))
 
 
+class CustomerLocationView(APIView):
+    """
+    POST /api/auth/customers/<user_id>/location/ — drop or correct a
+    customer's delivery pin from the field.
+
+    Staff may pin any customer. A rider may only pin a customer they are
+    CURRENTLY carrying an undelivered order for — the moment of standing at
+    the right gate is exactly when the pin is worth correcting. Customers set
+    their own pin through registration / profile, never through here.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, user_id):
+        target = get_object_or_404(User, pk=user_id, profile__user_type='customer')
+
+        requester_type = getattr(
+            getattr(request.user, 'profile', None), 'user_type', None,
+        )
+        if request.user.is_staff:
+            pass
+        elif requester_type == 'delivery_boy':
+            from orders.models import Order  # local import keeps accounts import-light
+
+            has_active_order = (
+                Order.objects
+                .filter(assigned_delivery_boy=request.user.profile, user=target)
+                .exclude(status__in=['Delivered', 'Cancelled'])
+                .exists()
+            )
+            if not has_active_order:
+                return Response(
+                    {'detail': 'You are not currently assigned an active order '
+                               'for this customer.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        else:
+            return Response(
+                {'detail': 'Only staff or the assigned rider may set a '
+                           'customer location.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        payload = CustomerLocationInputSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        profile = target.profile
+        # 'rider' covers every business-side correction (rider at the gate or
+        # staff at the desk); set_by records exactly who.
+        profile.set_customer_pin(
+            payload.validated_data['customer_latitude'],
+            payload.validated_data['customer_longitude'],
+            source='rider', set_by=request.user,
+        )
+        profile.save(update_fields=CUSTOMER_PIN_FIELDS)
+
+        activity_log(
+            request.user, 'customer', 'Customer Location Set',
+            target_type='customer', target_id=target.id,
+            target_label=target.get_full_name() or target.username,
+            details={
+                'latitude': str(profile.customer_latitude),
+                'longitude': str(profile.customer_longitude),
+            },
+        )
+        return Response(_customer_pin_payload(profile))
+
+
+class CustomerAddressViewSet(viewsets.ModelViewSet):
+    """The signed-in customer's address book.
+
+    Scoped to `request.user` at the queryset level, so an id belonging to
+    somebody else is a 404 rather than a leak. The first address a customer
+    saves becomes their default automatically (see the model), which is what
+    lets checkout pre-select without asking.
+    """
+    serializer_class = CustomerAddressSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return CustomerAddress.objects.filter(user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def set_default(self, request, pk=None):
+        """Promote this address. The model demotes whichever held it."""
+        address = self.get_object()
+        address.is_default = True
+        address.save()
+        return Response(self.get_serializer(address).data)
+
+
 class AdminCustomerCreateView(APIView):
-    """Admin creates a customer account (with phone + address) in one request."""
+    """Admin creates a customer account in one request.
+
+    Address is collected in the same parts as signup (house / portion / block /
+    area) and composed into `address`. A bare `address` string is still accepted
+    so older clients keep working, but the parts win when both are sent.
+
+    Password is optional: these are internal records for walk-in and phone
+    customers who never sign in. Leaving it blank stores an unusable password,
+    so the account cannot be logged into until an admin sets one. When a
+    password IS supplied it must clear the same policy as customer signup.
+    """
     permission_classes = [IsStaff]
 
     def post(self, request):
         username = (request.data.get('username') or '').strip()
-        password = request.data.get('password', '')
+        password = request.data.get('password') or ''
         first_name = (request.data.get('first_name') or '').strip()
         last_name = (request.data.get('last_name') or '').strip()
         email = (request.data.get('email') or '').strip()
         phone = (request.data.get('phone_number') or '').strip()
+
+        house_number = (request.data.get('house_number') or '').strip()
+        # Any spelling in, canonical key out — see core.address.
+        portion = normalize_portion(request.data.get('portion'))
+        block = (request.data.get('block') or '').strip()
+        area = (request.data.get('area') or '').strip()
         address = (request.data.get('address') or '').strip()
 
         if not username:
             return Response({'username': 'Username is required.'}, status=status.HTTP_400_BAD_REQUEST)
-        if len(password) < 6:
-            return Response({'password': 'Password must be at least 6 characters.'}, status=status.HTTP_400_BAD_REQUEST)
-        if User.objects.filter(username=username).exists():
+        if User.objects.filter(username__iexact=username).exists():
             return Response({'username': 'Username already taken.'}, status=status.HTTP_400_BAD_REQUEST)
+        if password:
+            policy_error = password_policy_error(password)
+            if policy_error:
+                return Response({'password': policy_error}, status=status.HTTP_400_BAD_REQUEST)
 
         user = User.objects.create(
             username=username,
@@ -332,22 +717,35 @@ class AdminCustomerCreateView(APIView):
             last_name=last_name,
             is_active=True,
         )
-        user.set_password(password)
+        if password:
+            user.set_password(password)
+        else:
+            user.set_unusable_password()
         user.save()
 
         profile = user.profile
+        profile.user_type = 'customer'
         if phone:
             profile.phone_number = phone
+        profile.house_number = house_number
+        profile.portion = portion
+        profile.block = block
+        profile.area = area
+        # sync_address() only overwrites when at least one part is filled, so a
+        # client that still sends a single free-text address keeps it.
         if address:
             profile.address = address
-        profile.user_type = 'customer'
-        profile.save(update_fields=['phone_number', 'address', 'user_type'])
+        profile.sync_address()
+        profile.save(update_fields=[
+            'user_type', 'phone_number', 'house_number', 'portion',
+            'block', 'area', 'address',
+        ])
 
         activity_log(
             request.user, 'customer', 'Customer Created',
             target_type='customer', target_id=user.id,
             target_label=user.get_full_name() or user.username,
-            details={'username': user.username},
+            details={'username': user.username, 'can_sign_in': bool(password)},
         )
         return Response({
             'id': user.id,
@@ -355,6 +753,11 @@ class AdminCustomerCreateView(APIView):
             'name': user.get_full_name() or user.username,
             'phone': profile.phone_number,
             'address': profile.address,
+            'house_number': profile.house_number,
+            'portion': profile.portion,
+            'block': profile.block,
+            'area': profile.area,
+            'can_sign_in': bool(password),
         }, status=status.HTTP_201_CREATED)
 
 

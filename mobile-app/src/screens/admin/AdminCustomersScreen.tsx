@@ -10,6 +10,13 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../types/navigation';
 import { balanceReminderMessage, canWhatsApp, openWhatsApp } from '../../utils/whatsapp';
+import {
+  AddressFields, AddressParts, EMPTY_ADDRESS, validateAddress,
+  composeAddress, splitAddress,
+} from '../../components/AddressFields';
+import { matchesCustomerSearch } from '../../utils/customerSearch';
+import { FieldLabel, PasswordRules, isPasswordValid } from '../../components/FormField';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 
 // ─── Styles (declared first so all components below can reference them) ───────
 
@@ -60,8 +67,9 @@ const addModal = StyleSheet.create({
     backgroundColor: '#f0f0f0', alignItems: 'center', justifyContent: 'center',
   },
   row: { flexDirection: 'row', gap: 10 },
-  label: { fontSize: 13, fontWeight: '600', color: '#444', marginBottom: 5, marginTop: 12 },
-  required: { color: '#FF3B30' },
+  field: { marginTop: 14 },
+  sectionTitle: { fontSize: 13, fontWeight: '700', color: '#444', marginBottom: 8 },
+  helper: { fontSize: 12, color: '#888', marginTop: 6, lineHeight: 16 },
   input: {
     borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
     padding: 11, fontSize: 14, color: '#333', backgroundColor: '#fafafa',
@@ -135,7 +143,7 @@ const modal = StyleSheet.create({
 
 const EMPTY_FORM = {
   first_name: '', last_name: '', username: '',
-  phone_number: '', address: '', password: '',
+  phone_number: '', password: '',
 };
 
 function AddCustomerModal({
@@ -146,6 +154,8 @@ function AddCustomerModal({
   onCreated: () => void;
 }) {
   const [form, setForm] = useState(EMPTY_FORM);
+  const [address, setAddress] = useState<AddressParts>(EMPTY_ADDRESS);
+  const [addressErrors, setAddressErrors] = useState<Partial<Record<keyof AddressParts, string>>>({});
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -153,26 +163,62 @@ function AddCustomerModal({
   const set = (key: keyof typeof EMPTY_FORM) => (val: string) =>
     setForm(f => ({ ...f, [key]: val }));
 
-  const reset = () => { setForm(EMPTY_FORM); setError(''); setShowPassword(false); };
+  const reset = () => {
+    setForm(EMPTY_FORM);
+    setAddress(EMPTY_ADDRESS);
+    setAddressErrors({});
+    setError('');
+    setShowPassword(false);
+  };
+
+  // A walk-in is often registered from a phone call with nothing but a name, so
+  // an entirely blank address is allowed. Once any part is typed the record is
+  // meant to be delivered to, and a half-address cannot be.
+  const hasAddress = Object.values(address).some(part => part.trim() !== '');
+  const passwordUnusable = form.password !== '' && !isPasswordValid(form.password);
 
   const submit = async () => {
     setError('');
+    setAddressErrors({});
     if (!form.username.trim()) { setError('Username is required.'); return; }
-    if (form.password.length < 6) { setError('Password must be at least 6 characters.'); return; }
+    if (passwordUnusable) { setError('The password does not meet the requirements below.'); return; }
+
+    if (hasAddress) {
+      const errs = validateAddress(address);
+      if (Object.keys(errs).length) {
+        setAddressErrors(errs);
+        setError('Complete the address, or clear every part of it.');
+        return;
+      }
+    }
 
     setSaving(true);
     try {
-      await adminService.createCustomer({
+      const created = await adminService.createCustomer({
         username: form.username.trim(),
-        password: form.password,
         first_name: form.first_name.trim() || undefined,
         last_name: form.last_name.trim() || undefined,
         phone_number: form.phone_number.trim() || undefined,
-        address: form.address.trim() || undefined,
+        // Omitted entirely rather than sent blank — the backend reads a missing
+        // password as "store an unusable one", not as an empty password.
+        ...(form.password ? { password: form.password } : {}),
+        ...(hasAddress ? {
+          house_number: address.house_number.trim(),
+          portion: address.portion.trim() || undefined,
+          block: address.block.trim() || undefined,
+          area: address.area.trim(),
+        } : {}),
       });
       reset();
       onCreated();
       onClose();
+      if (!created.can_sign_in) {
+        Alert.alert(
+          'Customer saved',
+          `${created.name || created.username} was created without sign-in access. `
+          + 'An admin can set a password later if they ever need to log in.',
+        );
+      }
     } catch (e: any) {
       let msg = 'Failed to create customer.';
       try { const parsed = JSON.parse(e.message); msg = Object.values(parsed).flat().join(' '); } catch {}
@@ -193,17 +239,17 @@ function AddCustomerModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <KeyboardAwareScrollView showsVerticalScrollIndicator={false} extraBottomSpace={28}>
             <View style={addModal.row}>
               <View style={{ flex: 1 }}>
-                <Text style={addModal.label}>First Name</Text>
+                <FieldLabel text="First Name" />
                 <TextInput
                   style={addModal.input} value={form.first_name} onChangeText={set('first_name')}
                   placeholder="Ali" placeholderTextColor="#bbb"
                 />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={addModal.label}>Last Name</Text>
+                <FieldLabel text="Last Name" />
                 <TextInput
                   style={addModal.input} value={form.last_name} onChangeText={set('last_name')}
                   placeholder="Hassan" placeholderTextColor="#bbb"
@@ -211,42 +257,53 @@ function AddCustomerModal({
               </View>
             </View>
 
-            <Text style={addModal.label}>
-              Username <Text style={addModal.required}>*</Text>
-            </Text>
-            <TextInput
-              style={addModal.input} value={form.username} onChangeText={set('username')}
-              placeholder="alihassan" placeholderTextColor="#bbb"
-              autoCapitalize="none" autoCorrect={false}
-            />
-
-            <Text style={addModal.label}>Phone</Text>
-            <TextInput
-              style={addModal.input} value={form.phone_number} onChangeText={set('phone_number')}
-              placeholder="03xx-xxxxxxx" placeholderTextColor="#bbb" keyboardType="phone-pad"
-            />
-
-            <Text style={addModal.label}>Address</Text>
-            <TextInput
-              style={[addModal.input, { height: 60, textAlignVertical: 'top' }]}
-              value={form.address} onChangeText={set('address')}
-              placeholder="House #, Street, Area" placeholderTextColor="#bbb"
-              multiline
-            />
-
-            <Text style={addModal.label}>
-              Password <Text style={addModal.required}>*</Text>
-            </Text>
-            <View style={addModal.passwordRow}>
+            <View style={addModal.field}>
+              <FieldLabel text="Username" required />
               <TextInput
-                style={[addModal.input, { flex: 1 }]}
-                value={form.password} onChangeText={set('password')}
-                placeholder="Min. 6 characters" placeholderTextColor="#bbb"
-                secureTextEntry={!showPassword}
+                style={addModal.input} value={form.username} onChangeText={set('username')}
+                placeholder="alihassan" placeholderTextColor="#bbb"
+                autoCapitalize="none" autoCorrect={false}
               />
-              <TouchableOpacity onPress={() => setShowPassword(v => !v)} style={addModal.eyeBtn}>
-                <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={18} color="#888" />
-              </TouchableOpacity>
+            </View>
+
+            <View style={addModal.field}>
+              <FieldLabel text="Phone" />
+              <TextInput
+                style={addModal.input} value={form.phone_number} onChangeText={set('phone_number')}
+                placeholder="03xx-xxxxxxx" placeholderTextColor="#bbb" keyboardType="phone-pad"
+              />
+            </View>
+
+            <View style={addModal.field}>
+              <Text style={addModal.sectionTitle}>Address</Text>
+              <AddressFields
+                value={address}
+                onChange={setAddress}
+                errors={addressErrors}
+                hint="Leave every part blank if the address is not known yet."
+              />
+            </View>
+
+            <View style={addModal.field}>
+              <FieldLabel text="Password" />
+              <View style={addModal.passwordRow}>
+                <TextInput
+                  style={[addModal.input, { flex: 1 }]}
+                  value={form.password} onChangeText={set('password')}
+                  placeholder="Leave blank — no sign-in" placeholderTextColor="#bbb"
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none" autoCorrect={false}
+                />
+                <TouchableOpacity onPress={() => setShowPassword(v => !v)} style={addModal.eyeBtn}>
+                  <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={18} color="#888" />
+                </TouchableOpacity>
+              </View>
+              <Text style={addModal.helper}>
+                Walk-in and phone-in customers do not need one. Left blank, the account cannot be
+                signed into — an admin can set a password later.
+              </Text>
+              {/* Only police a password that was actually typed. */}
+              {form.password !== '' && <PasswordRules password={form.password} />}
             </View>
 
             {error !== '' && (
@@ -256,9 +313,9 @@ function AddCustomerModal({
             )}
 
             <TouchableOpacity
-              style={[addModal.submitBtn, saving && { opacity: 0.6 }]}
+              style={[addModal.submitBtn, (saving || passwordUnusable) && { opacity: 0.6 }]}
               onPress={submit}
-              disabled={saving}
+              disabled={saving || passwordUnusable}
             >
               {saving
                 ? <ActivityIndicator size="small" color="white" />
@@ -270,7 +327,7 @@ function AddCustomerModal({
                 )
               }
             </TouchableOpacity>
-          </ScrollView>
+          </KeyboardAwareScrollView>
         </View>
       </View>
     </Modal>
@@ -290,13 +347,27 @@ function CustomerStatsModal({
   const [stats, setStats] = useState<CustomerStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [phone, setPhone] = useState('');
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState<AddressParts>(EMPTY_ADDRESS);
+  const [addressErrors, setAddressErrors] = useState<Partial<Record<keyof AddressParts, string>>>({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!customer) return;
     setPhone(customer.phone || '');
-    setAddress(customer.address || '');
+    // Prefer the stored parts. Records created before the split have none, so
+    // fall back to picking the old one-line address apart — otherwise editing a
+    // legacy customer would silently blank their address.
+    setAddress(
+      customer.house_number || customer.area || customer.block || customer.portion
+        ? {
+            house_number: customer.house_number || '',
+            portion: customer.portion || '',
+            block: customer.block || '',
+            area: customer.area || '',
+          }
+        : splitAddress(customer.address),
+    );
+    setAddressErrors({});
     setLoading(true);
     adminService.getCustomerStats(customer.id)
       .then(setStats)
@@ -306,14 +377,32 @@ function CustomerStatsModal({
 
   if (!customer) return null;
 
-  const changed = phone !== (customer.phone || '') || address !== (customer.address || '');
+  // Compare on the composed line: that is what the server stores, so an edit
+  // that only reshuffles the parts into the same address is genuinely no change.
+  const changed =
+    phone !== (customer.phone || '') ||
+    composeAddress(address) !== (customer.address || '');
 
   const save = async () => {
+    // An address is optional, but a half-filled one is not — without a house
+    // number and an area a rider has nowhere to go.
+    const wantsAddress = Object.values(address).some(part => part.trim() !== '');
+    const errs = wantsAddress ? validateAddress(address) : {};
+    setAddressErrors(errs);
+    if (Object.keys(errs).length > 0) {
+      Alert.alert('Check the address', 'Complete the address, or clear every part of it.');
+      return;
+    }
+
     setSaving(true);
     try {
+      // Only the parts go up; the server recomposes `address` from them.
       await adminService.updateCustomer(customer.id, {
         phone_number: phone.trim() || undefined,
-        address: address.trim() || undefined,
+        house_number: wantsAddress ? address.house_number.trim() : '',
+        portion: wantsAddress ? address.portion.trim() : '',
+        block: wantsAddress ? address.block.trim() : '',
+        area: wantsAddress ? address.area.trim() : '',
       });
       onUpdated?.();
       onClose();
@@ -366,16 +455,12 @@ function CustomerStatsModal({
               />
             </View>
 
-            <Text style={modal.editLabel}>Address</Text>
-            <View style={modal.inputRow}>
-              <Ionicons name="location-outline" size={15} color="#888" style={{ marginTop: 12 }} />
-              <TextInput
-                style={[modal.input, { height: 56, textAlignVertical: 'top' }]}
+            <View style={{ marginTop: 4 }}>
+              <AddressFields
                 value={address}
-                onChangeText={setAddress}
-                placeholder="House #, Street, Area"
-                placeholderTextColor="#bbb"
-                multiline
+                onChange={setAddress}
+                errors={addressErrors}
+                hint="Leave every part blank if the address is not known yet."
               />
             </View>
 
@@ -493,12 +578,10 @@ export const AdminCustomersScreen: React.FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  // Multi-word, digit-tolerant on phones, and aware of the structured address
+  // parts. Same rules as the server's search and the web admin's.
   const filtered = search
-    ? customers.filter(c =>
-        c.name.toLowerCase().includes(search.toLowerCase()) ||
-        (c.phone && c.phone.includes(search)) ||
-        (c.address && c.address.toLowerCase().includes(search.toLowerCase()))
-      )
+    ? customers.filter(c => matchesCustomerSearch(c, search))
     : customers;
 
   return (

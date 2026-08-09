@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
   User,
   UserX,
   Phone,
-  MapPin,
   CreditCard,
   Plus,
   Minus,
@@ -26,10 +25,22 @@ import { cn } from "@/lib/cn";
 import { ordersApi } from "@/lib/api";
 import { productsApi } from "@/lib/api/products";
 import { plantApi } from "@/lib/api/plant";
-import { Button, Input, Modal, useToast } from "@/components/ui";
+import {
+  AddressFields,
+  Button,
+  FieldLabel,
+  Input,
+  Modal,
+  Textarea,
+  splitAddress,
+  validateAddress,
+  EMPTY_ADDRESS,
+  useToast,
+  type AddressErrors,
+  type AddressParts,
+} from "@/components/ui";
 import { useDeliveryBoys } from "../hooks/useAdminOrders";
 import { useAsync } from "@/hooks/useAsync";
-import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 type CustomerMode = "existing" | "guest";
 
@@ -42,75 +53,6 @@ interface CreateOrderModalProps {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
-}
-
-// ─── Address autocomplete ─────────────────────────────────────────────────────
-
-function AddressInput({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [open, setOpen] = useState(false);
-  const debouncedQ = useDebouncedValue(value, 300);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (debouncedQ.length < 2) {
-      setSuggestions([]);
-      setOpen(false);
-      return;
-    }
-    ordersApi.addressSuggestions(debouncedQ).then((list) => {
-      setSuggestions(list);
-      setOpen(list.length > 0);
-    });
-  }, [debouncedQ]);
-
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  return (
-    <div ref={containerRef} className="relative">
-      <Input
-        label="Delivery address"
-        placeholder="House #, Street, Area"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        icon={<MapPin size={15} />}
-      />
-      {open && (
-        <ul className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-white/15 bg-abyss shadow-lg">
-          {suggestions.map((s) => (
-            <li key={s}>
-              <button
-                type="button"
-                onMouseDown={() => {
-                  onChange(s);
-                  setOpen(false);
-                }}
-                className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm text-mist hover:bg-white/10"
-              >
-                <MapPin size={13} className="mt-0.5 shrink-0 text-wave" />
-                <span className="line-clamp-2">{s}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
 }
 
 // ─── Customer stats card ──────────────────────────────────────────────────────
@@ -188,18 +130,20 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
   const [userId, setUserId] = useState<number | "">("");
   const [guestName, setGuestName] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
-  const [address, setAddress] = useState("");
+  const [address, setAddress] = useState<AddressParts>(EMPTY_ADDRESS);
+  const [addressErrors, setAddressErrors] = useState<AddressErrors>({});
   const [riderId, setRiderId] = useState<number | "">("");
   const [deliveryNotes, setDeliveryNotes] = useState("");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Auto-fill address when selecting existing customer
+  // Auto-fill address when selecting existing customer. The customer list only
+  // carries the composed line, so it has to be split back into parts.
   useEffect(() => {
     if (mode === "existing" && userId) {
       const c = customers.data?.find((c) => c.id === userId);
-      if (c?.address) setAddress(c.address);
+      if (c?.address) setAddress(splitAddress(c.address));
     }
   }, [userId, mode, customers.data]);
 
@@ -210,7 +154,8 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
       setUserId("");
       setGuestName("");
       setGuestPhone("");
-      setAddress("");
+      setAddress(EMPTY_ADDRESS);
+      setAddressErrors({});
       setRiderId("");
       setDeliveryNotes("");
       setCart([]);
@@ -251,12 +196,21 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
 
   const submit = async () => {
     setError("");
+    const issues = validateAddress(address);
+    setAddressErrors(issues);
+
     if (cart.length === 0) { setError("Add at least one product."); return; }
-    if (!address.trim()) { setError("Delivery address is required."); return; }
+    if (Object.keys(issues).length > 0) { setError("Complete the delivery address."); return; }
+    if (mode === "existing" && !userId) { setError("Select a customer."); return; }
     if (mode === "guest" && !guestName.trim()) { setError("Guest name is required."); return; }
 
+    // Parts only — the backend composes `shipping_address` from them, so
+    // sending both would let the two disagree.
     const payload: CreateAdminOrderPayload = {
-      shipping_address: address,
+      house_number: address.house_number.trim(),
+      portion: address.portion.trim() || undefined,
+      block: address.block.trim() || undefined,
+      area: address.area.trim(),
       payment_method: "COD",
       assigned_delivery_boy: riderId || null,
       delivery_notes: deliveryNotes || undefined,
@@ -311,24 +265,31 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
 
           {mode === "existing" ? (
             <>
-              <select
-                value={userId}
-                onChange={(e) => setUserId(e.target.value ? Number(e.target.value) : "")}
-                className="input text-sm"
-              >
-                <option value="">— Select customer —</option>
-                {customers.data?.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} {c.phone ? `· ${c.phone}` : ""}{c.address ? ` (${c.address.slice(0, 28)})` : ""}
-                  </option>
-                ))}
-              </select>
+              <div>
+                <FieldLabel htmlFor="order-customer" requirement="required">
+                  Customer
+                </FieldLabel>
+                <select
+                  id="order-customer"
+                  value={userId}
+                  onChange={(e) => setUserId(e.target.value ? Number(e.target.value) : "")}
+                  className="input text-sm"
+                >
+                  <option value="">— Select customer —</option>
+                  {customers.data?.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {c.phone ? `· ${c.phone}` : ""}{c.address ? ` (${c.address.slice(0, 28)})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
               {userId !== "" && <CustomerStatsCard userId={userId as number} />}
             </>
           ) : (
             <div className="grid grid-cols-2 gap-3">
               <Input
                 label="Name"
+                requirement="required"
                 placeholder="Customer name"
                 value={guestName}
                 onChange={(e) => setGuestName(e.target.value)}
@@ -336,6 +297,7 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
               />
               <Input
                 label="Phone"
+                requirement="optional"
                 placeholder="03xx-xxxxxxx"
                 value={guestPhone}
                 onChange={(e) => setGuestPhone(e.target.value)}
@@ -345,8 +307,9 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
           )}
         </div>
 
-        {/* Delivery address with autocomplete */}
-        <AddressInput value={address} onChange={setAddress} />
+        {/* Outside the mode branch on purpose — a guest order needs an address
+            just as much as an account order does. */}
+        <AddressFields value={address} onChange={setAddress} errors={addressErrors} />
 
         {/* Products */}
         <div className="flex flex-col gap-2">
@@ -426,8 +389,11 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
 
         {/* Rider assignment */}
         <div>
-          <label className="label">Assign rider (optional)</label>
+          <FieldLabel htmlFor="order-rider" requirement="optional">
+            Assign rider
+          </FieldLabel>
           <select
+            id="order-rider"
             value={riderId}
             onChange={(e) => setRiderId(e.target.value ? Number(e.target.value) : "")}
             className="input text-sm"
@@ -441,16 +407,23 @@ export function CreateOrderModal({ open, onClose, onCreated }: CreateOrderModalP
           </select>
         </div>
 
-        {/* Delivery notes */}
+        {/* Note for the rider. Named for its audience rather than "Delivery
+            notes", which read like something the customer might see — and the
+            API no longer sends it to them, so the label should say so. */}
         <div>
-          <label className="label">Delivery notes (optional)</label>
-          <textarea
+          <Textarea
+            id="order-delivery-notes"
+            label="Note for the rider"
+            requirement="optional"
             value={deliveryNotes}
             onChange={(e) => setDeliveryNotes(e.target.value)}
-            placeholder="Special instructions…"
+            placeholder="Gate code 1234 · Call on arrival · Leave with the guard"
             rows={2}
-            className="input w-full resize-none text-sm"
+            className="text-sm"
           />
+          <p className="mt-1 text-xs text-mist/50">
+            Shown only to the rider delivering this order. The customer never sees it.
+          </p>
         </div>
 
         {error && <p className="text-sm text-rose-300">{error}</p>}

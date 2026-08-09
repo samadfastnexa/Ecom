@@ -1,5 +1,6 @@
 import { apiFetch, unwrapList } from "./client";
 import type {
+  AdminDeliveryStatus,
   AdminOrder,
   AdminOrderFilters,
   AdminOrderSummary,
@@ -68,8 +69,19 @@ export const ordersApi = {
     });
   },
 
-  adminSummary(): Promise<AdminOrderSummary> {
-    return apiFetch<AdminOrderSummary>("/orders/admin/summary/", { auth: true });
+  /**
+   * Headline stats. Passing a range scopes every figure to it; passing nothing
+   * keeps the all-time totals the summary row showed before the period filter.
+   */
+  adminSummary(range: { date_from?: string; date_to?: string } = {}): Promise<AdminOrderSummary> {
+    const sp = new URLSearchParams();
+    if (range.date_from) sp.set("date_from", range.date_from);
+    if (range.date_to) sp.set("date_to", range.date_to);
+    const qs = sp.toString();
+    return apiFetch<AdminOrderSummary>(
+      `/orders/admin/summary/${qs ? `?${qs}` : ""}`,
+      { auth: true }
+    );
   },
 
   adminDeliveryBoys(): Promise<DeliveryBoy[]> {
@@ -86,5 +98,40 @@ export const ordersApi = {
 
   customerStats(userId: number): Promise<CustomerOrderStats> {
     return apiFetch<CustomerOrderStats>(`/orders/admin/customer-stats/${userId}/`, { auth: true });
+  },
+};
+
+/**
+ * Delivery statuses the rider app offers when closing a drop.
+ *
+ * `adminList` includes retired ones; the rider's own endpoint is filtered to
+ * active. Retiring is `is_active = false` rather than a delete — orders store
+ * the status by name, so removing the row would leave historic deliveries
+ * labelled with something nothing can explain. The server refuses to delete
+ * one that any order already uses.
+ */
+export const deliveryStatusesApi = {
+  adminList(): Promise<AdminDeliveryStatus[]> {
+    return apiFetch<AdminDeliveryStatus[]>("/orders/admin/delivery-statuses/", { auth: true });
+  },
+
+  create(payload: Omit<AdminDeliveryStatus, "id">): Promise<AdminDeliveryStatus> {
+    return apiFetch<AdminDeliveryStatus>("/orders/admin/delivery-statuses/", {
+      method: "POST",
+      auth: true,
+      body: payload,
+    });
+  },
+
+  update(id: number, payload: Partial<Omit<AdminDeliveryStatus, "id">>): Promise<AdminDeliveryStatus> {
+    return apiFetch<AdminDeliveryStatus>(`/orders/admin/delivery-statuses/${id}/`, {
+      method: "PATCH",
+      auth: true,
+      body: payload,
+    });
+  },
+
+  remove(id: number): Promise<void> {
+    return apiFetch<void>(`/orders/admin/delivery-statuses/${id}/`, { method: "DELETE", auth: true });
   },
 };

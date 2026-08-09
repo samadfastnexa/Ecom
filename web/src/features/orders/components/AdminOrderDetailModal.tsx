@@ -17,12 +17,17 @@ import {
   TrendingDown,
   Minus,
   Navigation,
+  MessageCircle,
 } from "lucide-react";
+import { canWhatsApp, openWhatsApp } from "@/lib/whatsapp";
+import { canCall, telHref } from "@/lib/phone";
 import type { AdminOrder, DeliveryStatusOption } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { ordersApi } from "@/lib/api";
-import { Button, Modal, useToast } from "@/components/ui";
+import { coordsFrom } from "@/lib/geo";
+import { Button, Chip, Modal, useToast } from "@/components/ui";
+import { PinMap } from "@/components/maps/PinMap";
 import { useAsync } from "@/hooks/useAsync";
 import { OrderStatusBadge } from "./OrderStatusBadge";
 
@@ -50,6 +55,49 @@ function Row({ icon: Icon, label, value }: { icon: typeof MapPin; label: string;
 function fmt(ts: string | null | undefined) {
   if (!ts) return null;
   return new Date(ts).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+// ─── Where it goes ────────────────────────────────────────────────────────────
+
+/**
+ * The delivery destination as the order recorded it.
+ *
+ * All of this is a snapshot taken when the order was placed, so it keeps
+ * showing where this parcel was meant to go even after the customer edits or
+ * deletes that address book entry — which is exactly what a dispute needs.
+ */
+function ShippingBlock({ order }: { order: AdminOrder }) {
+  const coords = coordsFrom(order.shipping_latitude, order.shipping_longitude);
+
+  return (
+    <div className="flex gap-3 border-b border-white/10 py-3">
+      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/5 text-wave">
+        <MapPin size={15} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs uppercase tracking-wide text-mist/40">Shipping address</p>
+          {order.shipping_label && (
+            <Chip className="border border-wave/30 bg-wave/10 text-wave">
+              {order.shipping_label}
+            </Chip>
+          )}
+        </div>
+
+        <p className="text-sm text-mist">{order.shipping_address || "—"}</p>
+
+        {coords ? (
+          // PinMap carries the coordinates and the Google Maps link itself, and
+          // falls back to text when the build has no Maps key.
+          <PinMap coords={coords} heightClass="h-52" className="mt-3" />
+        ) : (
+          <p className="mt-1 text-xs text-mist/35">
+            No map pin — the customer did not drop one on this order.
+          </p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ─── Balance indicator ────────────────────────────────────────────────────────
@@ -267,6 +315,35 @@ export function AdminOrderDetailModal({ order, onClose, onUpdated }: AdminOrderD
         <Row icon={Mail} label="Email" value={order.customer_email} />
         <Row icon={Phone} label="Phone" value={order.customer_phone} />
 
+        {/* Two ways to reach them, side by side. Which one is right is not
+            ours to decide: WhatsApp is free but the customer may not have it
+            or be online, so the SIM is always offered alongside it. `tel:`
+            hands off to whatever the desktop has registered — Teams, Skype, a
+            paired phone — and to the dialler on mobile. */}
+        {(canCall(order.customer_phone) || canWhatsApp(order.customer_phone)) && (
+          <div className="flex gap-2 py-3">
+            {canCall(order.customer_phone) && (
+              <a
+                href={`tel:${telHref(order.customer_phone)}`}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-wave/15 py-2.5 text-sm font-semibold text-wave transition hover:bg-wave/25"
+              >
+                <Phone size={15} /> Call
+              </a>
+            )}
+            {canWhatsApp(order.customer_phone) && (
+              <button
+                onClick={() => openWhatsApp(
+                  order.customer_phone,
+                  `Hello ${order.customer_name}, regarding your order #${order.id}.`,
+                )}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500/15 py-2.5 text-sm font-semibold text-emerald-300 transition hover:bg-emerald-500/25"
+              >
+                <MessageCircle size={15} /> WhatsApp
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Customer account balance (registered users only) */}
         {order.customer_balance !== null && order.customer_balance !== undefined && (
           <div className="flex gap-3 border-b border-white/10 py-3">
@@ -291,7 +368,7 @@ export function AdminOrderDetailModal({ order, onClose, onUpdated }: AdminOrderD
           </div>
         )}
 
-        <Row icon={MapPin} label="Shipping address" value={order.shipping_address} />
+        <ShippingBlock order={order} />
         <Row
           icon={CreditCard}
           label="Payment"
@@ -331,7 +408,7 @@ export function AdminOrderDetailModal({ order, onClose, onUpdated }: AdminOrderD
           <Row icon={Truck} label="Delivery boy" value={order.assigned_delivery_boy_name} />
         )}
         {order.delivery_notes && (
-          <Row icon={MessageSquare} label="Delivery notes" value={order.delivery_notes} />
+          <Row icon={MessageSquare} label="Note for the rider" value={order.delivery_notes} />
         )}
 
         {/* Timestamps */}

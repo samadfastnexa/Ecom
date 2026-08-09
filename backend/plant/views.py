@@ -16,6 +16,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
+from accounts.permissions import user_can_override_discount
+from activities.service import log as activity_log
+
 from .models import DeliveryRecord, CustomerType, BottleType, PlantSettings
 from .serializers import (
     DeliveryRecordSerializer, CustomerTypeSerializer, BottleTypeSerializer,
@@ -66,6 +69,48 @@ class DeliveryRecordViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return _apply_filters(super().get_queryset(), self.request.query_params)
 
+    # ── Discount override gate ───────────────────────────────────────────────
+    # The auto-applied discount is untouchable without the dedicated
+    # permission; is_staff alone is deliberately not enough.
+
+    def _deny_discount_override(self, request):
+        if request.data.get('discount_override') in (None, ''):
+            return None
+        if user_can_override_discount(request.user):
+            return None
+        return Response(
+            {'detail': 'You do not have permission to override the discount.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    def _log_discount_override(self, record):
+        """Every override is audited: who, the auto amount, the override."""
+        auto = getattr(record, '_auto_discount_amount', None)
+        if auto is None:
+            return
+        activity_log(
+            self.request.user, 'customer', 'Discount Overridden',
+            target_type='delivery_record', target_id=record.pk,
+            target_label=f'Delivery #{record.pk}',
+            details={
+                'customer': record.customer.username if record.customer else record.house,
+                'auto_discount': str(auto),
+                'override_discount': str(record.discount_amount),
+            },
+        )
+
+    def create(self, request, *args, **kwargs):
+        denied = self._deny_discount_override(request)
+        if denied is not None:
+            return denied
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        denied = self._deny_discount_override(request)
+        if denied is not None:
+            return denied
+        return super().update(request, *args, **kwargs)
+
     # ── Ledger sync ──────────────────────────────────────────────────────────
     # Bottle deliveries are a charge and their paid_amount is a payment, so each
     # write here has to be mirrored into the customer's ledger. sync is
@@ -74,11 +119,13 @@ class DeliveryRecordViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         record = serializer.save()
+        self._log_discount_override(record)
         from ledger.service import sync_delivery_record
         sync_delivery_record(record, actor=self.request.user)
 
     def perform_update(self, serializer):
         record = serializer.save()
+        self._log_discount_override(record)
         from ledger.service import sync_delivery_record
         sync_delivery_record(record, actor=self.request.user)
 
@@ -157,6 +204,13 @@ def plant_customers(request):
             'username': u.username,
             'name': u.get_full_name() or u.username,
             'address': getattr(profile, 'address', None),
+            # The parts as well as the composed line: the mobile admin edits an
+            # address here through the same four-field form as everywhere else,
+            # and it needs the parts to put back into its inputs.
+            'house_number': getattr(profile, 'house_number', None),
+            'portion': getattr(profile, 'portion', None),
+            'block': getattr(profile, 'block', None),
+            'area': getattr(profile, 'area', None),
             'phone': getattr(profile, 'phone_number', None),
             'price': custom if custom is not None else standard,
             'has_custom_price': custom is not None,
@@ -243,7 +297,7 @@ def plant_export(request):
 
     headers = [
         'Date', 'House / Address', 'Customer Account', 'Customer Type',
-        'Bottle Type', 'Bottles', 'Unit Price', 'Amount',
+        'Bottle Type', 'Bottles', 'Unit Price', 'Gross', 'Discount', 'Amount',
         'Received', 'Pending', 'Status', 'Notes',
     ]
     ws.append(headers)
@@ -258,6 +312,7 @@ def plant_export(request):
 
     total_bottles = 0
     total_amount = Decimal('0')
+    total_discount = Decimal('0')
     total_received = Decimal('0')
     total_pending = Decimal('0')
     for r in qs:
@@ -273,6 +328,9 @@ def plant_export(request):
             r.bottle_type.name if r.bottle_type else '',
             r.bottles,
             float(r.unit_price),
+            # Blank, not 0.00, when the row carries no discount.
+            float(r.gross_amount) if r.discount_amount else '',
+            float(r.discount_amount) if r.discount_amount else '',
             float(r.amount),
             float(r.paid_amount),
             float(r.pending),
@@ -281,22 +339,26 @@ def plant_export(request):
         ])
         total_bottles += r.bottles
         total_amount += r.amount
+        total_discount += r.discount_amount or 0
         total_received += r.paid_amount
         total_pending += r.pending
 
-    # Totals row
+    # Totals row. Net + discount is the true gross across every row, because
+    # an undiscounted row's gross equals its amount.
     ws.append([])
     total_row = [
         '', '', '', '', 'TOTAL', total_bottles, '',
+        float(total_amount + total_discount),
+        float(total_discount) if total_discount else '',
         float(total_amount), float(total_received), float(total_pending), '', '',
     ]
     ws.append(total_row)
     last = ws.max_row
-    for col in (5, 6, 8, 9, 10):
+    for col in (5, 6, 8, 9, 10, 11, 12):
         ws.cell(row=last, column=col).font = Font(bold=True)
 
     # Reasonable column widths
-    widths = [12, 26, 20, 16, 14, 9, 11, 12, 12, 12, 10, 26]
+    widths = [12, 26, 20, 16, 14, 9, 11, 12, 12, 12, 12, 12, 10, 26]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
