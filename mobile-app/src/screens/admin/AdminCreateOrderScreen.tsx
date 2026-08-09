@@ -4,9 +4,14 @@ import {
   TextInput, Alert, ActivityIndicator,
 } from 'react-native';
 import { LoadingScreen } from '../../components/LoadingScreen';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { adminService, AdminCustomer, DeliveryBoy } from '../../services/adminService';
+import {
+  AddressFields, AddressParts, EMPTY_ADDRESS, splitAddress, validateAddress,
+} from '../../components/AddressFields';
+import { FieldLabel } from '../../components/FormField';
 
 type CustomerMode = 'existing' | 'guest';
 
@@ -28,7 +33,8 @@ export const AdminCreateOrderScreen: React.FC = () => {
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [guestName, setGuestName] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState<AddressParts>(EMPTY_ADDRESS);
+  const [addressErrors, setAddressErrors] = useState<Partial<Record<keyof AddressParts, string>>>({});
   // Cash-only business — no picker needed.
   const paymentMethod = 'COD';
   const [selectedRiderId, setSelectedRiderId] = useState<number | null>(null);
@@ -51,13 +57,24 @@ export const AdminCreateOrderScreen: React.FC = () => {
     }).finally(() => setLoadingData(false));
   }, []);
 
-  // Auto-fill address when customer selected
+  // Auto-fill address when customer selected. The customer list only carries the
+  // composed line, so split it back into parts — a best-effort match beats making
+  // staff retype an address that is already on file.
   useEffect(() => {
     if (selectedCustomerId) {
       const c = customers.find(c => c.id === selectedCustomerId);
-      if (c?.address) setAddress(c.address);
+      if (c?.address) {
+        setAddress(splitAddress(c.address));
+        setAddressErrors({});
+      }
     }
   }, [selectedCustomerId, customers]);
+
+  const changeAddress = (next: AddressParts) => {
+    setAddress(next);
+    // Only re-validate once errors are on screen, so typing never raises new ones.
+    if (Object.keys(addressErrors).length) setAddressErrors(validateAddress(next));
+  };
 
   const addToCart = (product: typeof products[0]) => {
     setCart(prev => {
@@ -83,11 +100,24 @@ export const AdminCreateOrderScreen: React.FC = () => {
 
   const submit = async () => {
     if (cart.length === 0) { Alert.alert('Error', 'Add at least one product.'); return; }
-    if (!address.trim()) { Alert.alert('Error', 'Delivery address is required.'); return; }
+
+    const addrErrors = validateAddress(address);
+    if (Object.keys(addrErrors).length) {
+      setAddressErrors(addrErrors);
+      Alert.alert('Error', 'Complete the delivery address.');
+      return;
+    }
+    setAddressErrors({});
+
     if (mode === 'guest' && !guestName.trim()) { Alert.alert('Error', 'Guest name is required.'); return; }
 
+    // Parts, not a composed line: the backend rebuilds the address so an order
+    // and a customer record are always formatted the same way.
     const payload: any = {
-      shipping_address: address,
+      house_number: address.house_number.trim(),
+      portion: address.portion.trim() || undefined,
+      block: address.block.trim() || undefined,
+      area: address.area.trim(),
       payment_method: 'COD',
       assigned_delivery_boy: selectedRiderId || null,
       delivery_notes: deliveryNotes || undefined,
@@ -124,7 +154,11 @@ export const AdminCreateOrderScreen: React.FC = () => {
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
   return (
-    <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
+    <KeyboardAwareScrollView
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      extraBottomSpace={32}
+    >
 
       {/* Customer mode toggle */}
       <View style={styles.section}>
@@ -146,6 +180,7 @@ export const AdminCreateOrderScreen: React.FC = () => {
 
         {mode === 'existing' ? (
           <View>
+            <FieldLabel text="Pick a customer" required />
             <TextInput
               style={styles.searchInput}
               placeholder="Search by name, phone, or address…"
@@ -177,43 +212,46 @@ export const AdminCreateOrderScreen: React.FC = () => {
           </View>
         ) : (
           <View style={styles.guestFields}>
-            <TextInput
-              style={styles.input}
-              placeholder="Customer name *"
-              value={guestName}
-              onChangeText={setGuestName}
-              placeholderTextColor="#aaa"
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Phone number"
-              value={guestPhone}
-              onChangeText={setGuestPhone}
-              keyboardType="phone-pad"
-              placeholderTextColor="#aaa"
-            />
+            <View>
+              <FieldLabel text="Customer name" required />
+              <TextInput
+                style={styles.input}
+                placeholder="Who is the order for?"
+                value={guestName}
+                onChangeText={setGuestName}
+                placeholderTextColor="#aaa"
+              />
+            </View>
+            <View>
+              <FieldLabel text="Phone number" />
+              <TextInput
+                style={styles.input}
+                placeholder="03xx-xxxxxxx"
+                value={guestPhone}
+                onChangeText={setGuestPhone}
+                keyboardType="phone-pad"
+                placeholderTextColor="#aaa"
+              />
+            </View>
           </View>
         )}
       </View>
 
-      {/* Address */}
+      {/* Address — outside the mode branches because a rider needs one either way */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Delivery Address *</Text>
-        <TextInput
-          style={[styles.input, styles.addressInput]}
-          placeholder="House #, Street, Area…"
+        <Text style={styles.sectionTitle}>Delivery Address</Text>
+        <AddressFields
           value={address}
-          onChangeText={setAddress}
-          multiline
-          numberOfLines={2}
-          placeholderTextColor="#aaa"
-          textAlignVertical="top"
+          onChange={changeAddress}
+          errors={addressErrors}
+          hint="This is what the rider sees on the delivery list."
         />
       </View>
 
       {/* Products */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Products</Text>
+        <FieldLabel text="Pick at least one" required />
         <View style={styles.productGrid}>
           {products.map(p => {
             const inCart = cart.find(c => c.product.id === p.id);
@@ -271,7 +309,8 @@ export const AdminCreateOrderScreen: React.FC = () => {
 
       {/* Rider */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Assign Rider (optional)</Text>
+        <Text style={styles.sectionTitle}>Rider</Text>
+        <FieldLabel text="Assign rider" />
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={styles.riderRow}>
             <TouchableOpacity
@@ -297,17 +336,24 @@ export const AdminCreateOrderScreen: React.FC = () => {
         </ScrollView>
       </View>
 
-      {/* Notes */}
+      {/* Note for the rider. Named for its audience rather than "Delivery
+          notes", which read like something the customer might see — and the API
+          no longer sends it to them, so the label should say so. */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Delivery Notes (optional)</Text>
+        <Text style={styles.sectionTitle}>Note for the rider</Text>
+        <FieldLabel text="What should the rider know?" />
         <TextInput
           style={[styles.input, { height: 70, textAlignVertical: 'top' }]}
-          placeholder="Special instructions…"
+          placeholder="Gate code 1234 · Call on arrival · Leave with the guard"
           value={deliveryNotes}
           onChangeText={setDeliveryNotes}
           multiline
           placeholderTextColor="#aaa"
+          maxLength={500}
         />
+        <Text style={styles.fieldHint}>
+          Shown only to the rider delivering this order. The customer never sees it.
+        </Text>
       </View>
 
       {/* Submit */}
@@ -328,13 +374,15 @@ export const AdminCreateOrderScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      <View style={{ height: 32 }} />
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
+  // Room to scroll the last field clear of the keyboard. Replaces the spacer
+  // View that used to sit at the bottom of the scroll.
+  scrollContent: { paddingBottom: 48 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
   loadingText: { fontSize: 14, color: '#888' },
   section: {
@@ -371,7 +419,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#e0e0e0', borderRadius: 8,
     padding: 11, fontSize: 14, color: '#333', backgroundColor: '#fafafa',
   },
-  addressInput: { minHeight: 60, textAlignVertical: 'top' },
+  fieldHint: { fontSize: 11.5, color: '#8a929b', marginTop: 6, lineHeight: 16 },
   productGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   productCard: {
     width: '47%', borderRadius: 10, borderWidth: 1.5,

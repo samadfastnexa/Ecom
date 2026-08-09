@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
   TextInput, ActivityIndicator, Alert, Switch, Image,
@@ -9,12 +9,14 @@ import { adminService, AdminProduct, AdminCategory } from '../../services/adminS
 import { API_URL } from '../../constants/config';
 import { MultiImagePicker } from '../../components/MultiImagePicker';
 import { PickedImage, appendImages } from '../../constants/imageLimits';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
 
 // ─── Product form modal ───────────────────────────────────────────────────────
 
 interface FormModalProps {
   visible: boolean;
   product: AdminProduct | null;
+  /** The FULL list; the modal narrows it to what may be picked. */
   categories: AdminCategory[];
   onClose: () => void;
   onSaved: () => void;
@@ -30,6 +32,21 @@ function ProductFormModal({ visible, product, categories, onClose, onSaved }: Fo
   const [images, setImages] = useState<PickedImage[]>([]);
   const [existingImages, setExistingImages] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+
+  /**
+   * Only active categories may be picked, so a retired one is never filed onto
+   * a product. The one exception is the category the edited product is already
+   * in: if it has since been hidden it stays in the list, because dropping it
+   * would leave nothing selected and quietly wipe the product's category the
+   * next time someone opened and saved it.
+   */
+  const pickable = useMemo(() => {
+    const active = categories.filter((c) => c.is_active);
+    const current = categories.find((c) => c.id === product?.category);
+    return current && !current.is_active ? [...active, current] : active;
+  }, [categories, product]);
+
+  const inHiddenCategory = !!categoryId && !pickable.find((c) => c.id === categoryId)?.is_active;
 
   useEffect(() => {
     if (product) {
@@ -93,7 +110,7 @@ function ProductFormModal({ visible, product, categories, onClose, onSaved }: Fo
           </TouchableOpacity>
         </View>
 
-        <ScrollView contentContainerStyle={fm.body}>
+        <KeyboardAwareScrollView contentContainerStyle={fm.body} extraBottomSpace={28}>
           <Text style={fm.label}>Product Name *</Text>
           <TextInput style={fm.input} value={name} onChangeText={setName} placeholder="e.g. 20L Water Bottle" placeholderTextColor="#bbb" />
 
@@ -115,16 +132,23 @@ function ProductFormModal({ visible, product, categories, onClose, onSaved }: Fo
             >
               <Text style={[fm.catText, categoryId === null && fm.catTextActive]}>None</Text>
             </TouchableOpacity>
-            {categories.map((c) => (
+            {pickable.map((c) => (
               <TouchableOpacity
                 key={c.id}
-                style={[fm.catChip, categoryId === c.id && fm.catChipActive]}
+                style={[fm.catChip, categoryId === c.id && fm.catChipActive, !c.is_active && fm.catChipHidden]}
                 onPress={() => setCategoryId(c.id)}
               >
-                <Text style={[fm.catText, categoryId === c.id && fm.catTextActive]}>{c.name}</Text>
+                <Text style={[fm.catText, categoryId === c.id && fm.catTextActive]}>
+                  {c.name}{!c.is_active && ' · Hidden'}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
+          {inHiddenCategory && (
+            <Text style={fm.hint}>
+              This category is hidden. It stays on this product until you pick another one.
+            </Text>
+          )}
 
           <MultiImagePicker
             label="Product images"
@@ -156,7 +180,7 @@ function ProductFormModal({ visible, product, categories, onClose, onSaved }: Fo
               : <Text style={fm.submitText}>{isEdit ? 'Save Changes' : 'Create Product'}</Text>
             }
           </TouchableOpacity>
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </View>
     </Modal>
   );
@@ -174,6 +198,7 @@ const fm = StyleSheet.create({
   categoryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   catChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: '#e0e0e0', backgroundColor: 'white' },
   catChipActive: { borderColor: '#007AFF', backgroundColor: '#007AFF15' },
+  catChipHidden: { borderStyle: 'dashed', backgroundColor: '#fafafa' },
   catText: { fontSize: 13, color: '#555' },
   catTextActive: { color: '#007AFF', fontWeight: '600' },
   activeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'white', borderRadius: 12, padding: 14, marginTop: 12 },
@@ -271,6 +296,7 @@ function CategoryRow({ category, onChanged }: { category: AdminCategory; onChang
   const [name, setName] = useState(category.name);
   const [icon, setIcon] = useState(category.icon || '');
   const [saving, setSaving] = useState(false);
+  const [toggling, setToggling] = useState(false);
 
   const startEdit = () => {
     setName(category.name);
@@ -292,10 +318,24 @@ function CategoryRow({ category, onChanged }: { category: AdminCategory; onChang
     }
   };
 
+  /** Hiding is the reversible alternative to deleting: products keep the
+   *  category, it simply stops being offered anywhere. */
+  const toggleActive = async () => {
+    setToggling(true);
+    try {
+      await adminService.updateCategory(category.id, { is_active: !category.is_active });
+      onChanged();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to update category.');
+    } finally {
+      setToggling(false);
+    }
+  };
+
   const remove = () => {
     Alert.alert(
       `Delete "${category.name}"?`,
-      'Products in this category will remain but become uncategorised.',
+      'Products in this category will remain but become uncategorised. Hide it instead to keep the link.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -324,11 +364,24 @@ function CategoryRow({ category, onChanged }: { category: AdminCategory; onChang
   }
 
   return (
-    <View style={cm.row}>
+    <View style={[cm.row, !category.is_active && cm.rowHidden]}>
       <View style={{ flex: 1 }}>
-        <Text style={cm.name}>{category.name}</Text>
+        <View style={cm.nameRow}>
+          <Text style={[cm.name, !category.is_active && cm.nameHidden]}>{category.name}</Text>
+          {!category.is_active && (
+            <View style={cm.pill}><Text style={cm.pillText}>Hidden</Text></View>
+          )}
+        </View>
         {!!category.icon && <Text style={cm.sub}>icon: {category.icon}</Text>}
       </View>
+      <Switch
+        value={category.is_active}
+        onValueChange={toggleActive}
+        disabled={toggling}
+        trackColor={{ false: '#e0e0e0', true: '#34C75940' }}
+        thumbColor={category.is_active ? '#34C759' : '#ccc'}
+        style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
+      />
       <TouchableOpacity onPress={startEdit} style={cm.iconBtn}>
         <Ionicons name="create-outline" size={18} color="#007AFF" />
       </TouchableOpacity>
@@ -403,7 +456,8 @@ function CategoryManagerModal({ visible, categories, onClose, onChanged }: Categ
           </View>
 
           <Text style={cm.footNote}>
-            Deleting a category keeps its products — they simply become uncategorised.
+            Switch a category off to hide it from the shop and from the product form —
+            its products keep it. Deleting is permanent: those products become uncategorised.
           </Text>
         </ScrollView>
       </View>
@@ -421,8 +475,13 @@ const cm = StyleSheet.create({
   hint: { fontSize: 11, color: '#aaa', marginTop: 8 },
   listCard: { backgroundColor: 'white', borderRadius: 12, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f5f5f5' },
+  rowHidden: { backgroundColor: '#fafafa' },
   editRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f5f5f5', backgroundColor: '#007AFF08' },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   name: { fontSize: 14, fontWeight: '600', color: '#1a1a1a' },
+  nameHidden: { color: '#aaa' },
+  pill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 20, backgroundColor: '#FF950015' },
+  pillText: { fontSize: 10, fontWeight: '700', color: '#FF9500' },
   sub: { fontSize: 11, color: '#aaa', marginTop: 1 },
   iconBtn: { padding: 6 },
   empty: { alignItems: 'center', padding: 32, gap: 8 },
@@ -445,6 +504,9 @@ export const AdminShopScreen: React.FC = () => {
 
   const load = useCallback(async () => {
     try {
+      // The full list (staff default) — the manager section needs the hidden
+      // ones to switch them back on, and the product form filters in memory
+      // rather than costing a second request.
       const [prods, cats] = await Promise.all([
         adminService.getProducts(),
         adminService.getCategories(),

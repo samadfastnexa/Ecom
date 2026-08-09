@@ -6,6 +6,10 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { adminService, AdminOrder, DeliveryBoy } from '../../services/adminService';
+import { OrderLocationMap } from '../../components/OrderLocationMap';
+import { KeyboardAwareScrollView } from '../../components/KeyboardAwareScrollView';
+import { canWhatsApp, openWhatsApp } from '../../utils/whatsapp';
+import { callNumber, canCall } from '../../utils/phone';
 
 interface RouteParams {
   order: AdminOrder;
@@ -51,7 +55,11 @@ export const AdminOrderDetailScreen: React.FC = () => {
   });
 
   return (
-    <ScrollView style={styles.container}>
+    <KeyboardAwareScrollView
+      style={styles.container}
+      contentContainerStyle={styles.scrollContent}
+      extraBottomSpace={32}
+    >
       {/* Header card */}
       <View style={styles.card}>
         <View style={styles.cardHeader}>
@@ -74,6 +82,28 @@ export const AdminOrderDetailScreen: React.FC = () => {
         )}
       </View>
 
+      {/* Delivery address — first thing after the header, because "where does
+          this go" is what an admin opens an order to answer. */}
+      <View style={styles.card}>
+        <View style={styles.addressHeader}>
+          <Text style={[styles.sectionTitle, styles.addressTitle]}>Delivery Address</Text>
+          {!!order.shipping_label && (
+            <View style={styles.labelChip}>
+              <Ionicons name="bookmark" size={11} color="#007AFF" />
+              <Text style={styles.labelChipText}>{order.shipping_label}</Text>
+            </View>
+          )}
+        </View>
+        <Text style={styles.addressText}>{order.shipping_address || '—'}</Text>
+        <OrderLocationMap
+          orderId={order.id}
+          latitude={order.shipping_latitude}
+          longitude={order.shipping_longitude}
+          label={order.shipping_label}
+          style={styles.addressMap}
+        />
+      </View>
+
       {/* Customer */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>Customer</Text>
@@ -81,13 +111,47 @@ export const AdminOrderDetailScreen: React.FC = () => {
         {order.guest_name && <InfoRow label="Type" value="📞 Guest / Call-in" />}
         {order.customer_phone && <InfoRow label="Phone" value={order.customer_phone} />}
         {order.customer_email && <InfoRow label="Email" value={order.customer_email} />}
-        <InfoRow label="Address" value={order.shipping_address} />
         {order.customer_balance !== null && (
           <InfoRow
             label="Balance"
             value={`PKR ${order.customer_balance}`}
             valueColor={order.customer_balance < 0 ? '#FF3B30' : '#34C759'}
           />
+        )}
+
+        {/* Two ways to reach them, side by side. Which one is right is not
+            ours to decide: WhatsApp is free but the customer may not have it
+            or be online, so the SIM is always offered alongside it. */}
+        {(canCall(order.customer_phone) || canWhatsApp(order.customer_phone)) && (
+          <View style={styles.contactActions}>
+            {canCall(order.customer_phone) && (
+              <TouchableOpacity
+                style={[styles.contactBtn, styles.callBtn]}
+                onPress={() => callNumber(order.customer_phone)}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={`Call ${order.customer_name}`}
+              >
+                <Ionicons name="call" size={16} color="#fff" />
+                <Text style={styles.contactBtnText}>Call</Text>
+              </TouchableOpacity>
+            )}
+            {canWhatsApp(order.customer_phone) && (
+              <TouchableOpacity
+                style={[styles.contactBtn, styles.waBtn]}
+                onPress={() => openWhatsApp(
+                  order.customer_phone,
+                  `Hello ${order.customer_name}, regarding your order #${order.id}.`,
+                )}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={`WhatsApp ${order.customer_name}`}
+              >
+                <Ionicons name="logo-whatsapp" size={16} color="#fff" />
+                <Text style={styles.contactBtnText}>WhatsApp</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         )}
       </View>
 
@@ -193,7 +257,7 @@ export const AdminOrderDetailScreen: React.FC = () => {
       {/* Notes */}
       <View style={styles.card}>
         <View style={styles.notesHeader}>
-          <Text style={styles.sectionTitle}>Delivery Notes</Text>
+          <Text style={styles.sectionTitle}>Note for the rider</Text>
           {!editingNotes && (
             <TouchableOpacity onPress={() => setEditingNotes(true)}>
               <Ionicons name="pencil" size={16} color="#007AFF" />
@@ -208,8 +272,12 @@ export const AdminOrderDetailScreen: React.FC = () => {
               onChangeText={setNotes}
               multiline
               numberOfLines={3}
-              placeholder="Add notes…"
+              placeholder="Gate code 1234 · Call on arrival · Leave with the guard"
+              maxLength={500}
             />
+            <Text style={styles.notesHint}>
+              Shown only to the rider delivering this order. The customer never sees it.
+            </Text>
             <View style={styles.notesActions}>
               <TouchableOpacity
                 style={styles.saveBtn}
@@ -261,8 +329,7 @@ export const AdminOrderDetailScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      <View style={{ height: 32 }} />
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 };
 
@@ -277,6 +344,9 @@ function InfoRow({ label, value, valueColor }: { label: string; value: string; v
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
+  // Room to scroll the notes box clear of the keyboard. Replaces the spacer
+  // View that used to sit at the bottom of the scroll.
+  scrollContent: { paddingBottom: 48 },
   card: {
     backgroundColor: 'white', margin: 12, marginBottom: 0,
     borderRadius: 12, padding: 16,
@@ -294,6 +364,16 @@ const styles = StyleSheet.create({
   },
   hiddenBannerText: { fontSize: 12, color: '#FF9500', fontWeight: '500' },
   sectionTitle: { fontSize: 15, fontWeight: '700', color: '#1a1a1a', marginBottom: 12 },
+  addressHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  addressTitle: { marginBottom: 0 },
+  labelChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: '#007AFF15', borderRadius: 20,
+    paddingHorizontal: 9, paddingVertical: 3,
+  },
+  labelChipText: { fontSize: 11, fontWeight: '700', color: '#007AFF' },
+  addressText: { fontSize: 15, color: '#1a1a1a', fontWeight: '600', lineHeight: 21, marginTop: 8 },
+  addressMap: { marginTop: 12 },
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
   infoLabel: { fontSize: 13, color: '#888', flex: 1 },
   infoValue: { fontSize: 13, color: '#1a1a1a', fontWeight: '500', flex: 2, textAlign: 'right' },
@@ -329,6 +409,17 @@ const styles = StyleSheet.create({
     padding: 10, fontSize: 14, color: '#333', minHeight: 80,
     textAlignVertical: 'top',
   },
+  notesHint: { fontSize: 11.5, color: '#8a929b', marginTop: 6, lineHeight: 16 },
+
+  // ── Customer contact ──────────────────────────────────────────────────────
+  contactActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  contactBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 7, paddingVertical: 11, borderRadius: 10,
+  },
+  callBtn: { backgroundColor: '#0A84FF' },
+  waBtn: { backgroundColor: '#25D366' },
+  contactBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   notesActions: { flexDirection: 'row', gap: 10, marginTop: 10 },
   saveBtn: {
     flex: 1, backgroundColor: '#007AFF', borderRadius: 8,
