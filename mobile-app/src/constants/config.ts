@@ -9,7 +9,12 @@ import Constants from 'expo-constants';
  *  This wins over anything in .env, so flipping it here is all
  *  you have to do (then restart Metro:  npx expo start -c).
  * ============================================================ */
-const USE_LOCAL = true;
+// `__DEV__` guard is deliberate and must stay. This flag used to be a plain
+// `true`, which meant a release build shipped pointing at a LAN address that
+// exists on nobody's phone — the app would install and then fail every request.
+// Now it can only ever take effect in a development build; production always
+// resolves the live API no matter what this is set to.
+const USE_LOCAL = __DEV__ && true;
 
 // Used only when USE_LOCAL is true. Point at your PC on the LAN.
 // Find your IP with:  ipconfig   (IPv4 Address, e.g. 192.168.1.5)

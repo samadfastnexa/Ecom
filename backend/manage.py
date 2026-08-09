@@ -16,7 +16,8 @@ def load_env():
     env_path = BASE_DIR / '.env'
     if not env_path.exists():
         return
-    for raw_line in env_path.read_text().splitlines():
+    # Explicit encoding - see the matching note in core/settings.py.
+    for raw_line in env_path.read_text(encoding='utf-8', errors='replace').splitlines():
         line = raw_line.strip()
         if not line or line.startswith('#') or '=' not in line:
             continue

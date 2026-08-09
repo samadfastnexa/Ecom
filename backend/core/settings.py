@@ -4,7 +4,10 @@ import os
 # Load .env from the backend directory
 _ENV_PATH = Path(__file__).resolve().parent.parent / '.env'
 if _ENV_PATH.exists():
-    with open(_ENV_PATH) as _f:
+    # encoding is explicit on purpose: shared hosts often default to an ASCII
+    # locale, and a single non-ASCII character in a .env comment then crashes
+    # Django at import with UnicodeDecodeError before anything can report it.
+    with open(_ENV_PATH, encoding='utf-8', errors='replace') as _f:
         for _line in _f:
             _line = _line.strip()
             if _line and not _line.startswith('#') and '=' in _line:

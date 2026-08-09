@@ -16,6 +16,7 @@ import { AddressBookScreen } from './src/screens/AddressBookScreen';
 import { OrderHistoryScreen } from './src/screens/OrderHistoryScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { RiderPaymentScreen } from './src/screens/RiderPaymentScreen';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { ComplaintScreen } from './src/screens/ComplaintScreen';
 import { OrderSuccessScreen } from './src/screens/OrderSuccessScreen';
 import { DeliveryOrderDetailScreen } from './src/screens/DeliveryOrderDetailScreen';
@@ -314,16 +315,18 @@ const AppContent = () => {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <LanguageProvider>
-          <CartProvider>
-            <AppContent />
-            <StatusBar style="dark" />
-          </CartProvider>
-        </LanguageProvider>
-      </AuthProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <LanguageProvider>
+            <CartProvider>
+              <AppContent />
+              <StatusBar style="dark" />
+            </CartProvider>
+          </LanguageProvider>
+        </AuthProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 
