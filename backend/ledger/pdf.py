@@ -215,36 +215,46 @@ def render_statement(data):
     story.append(Spacer(1, 8))
 
     header = ['Sr', 'Date', 'Bill', 'Items', 'Price', 'QTY', 'Empty',
-              'Debit', 'Credit', 'Balance']
+              'Gross', 'Disc', 'Debit', 'Credit', 'Balance']
     rows = [header]
     for i, entry in enumerate(data['rows'], start=1):
+        items_text = (entry.item_label or entry.description or '')
+        # The charge document must name the discount: "Discount (Wholesale)".
+        if entry.discount_amount and entry.discount_category_name:
+            items_text = f'{items_text} · Disc ({entry.discount_category_name})'
         rows.append([
             str(i),
             entry.entry_date.strftime('%d-%b-%Y'),
             entry.document_label,
-            (entry.item_label or entry.description or '')[:38],
+            items_text[:38],
             money(entry.unit_price) if entry.unit_price else '-',
             _num(entry.quantity),
             str(entry.bottles_in) if entry.bottles_in else '-',
+            # money() renders None/zero as a dash, so undiscounted rows keep
+            # these columns blank rather than showing 0.00.
+            money(entry.gross_amount),
+            money(entry.discount_amount),
             money(entry.debit),
             money(entry.credit),
             money(entry.running_balance),
         ])
 
     if not data['rows']:
-        rows.append(['', '', '', 'No entries for this period.', '', '', '', '', '', ''])
+        rows.append(['', '', '', 'No entries for this period.',
+                     '', '', '', '', '', '', '', ''])
 
     totals = data['totals']
     rows.append([
         '', '', '', '', '',
         _num(totals['quantity']), str(totals['bottles_in']),
+        money(totals.get('gross')), money(totals.get('discount')),
         money(totals['debit']), money(totals['credit']), '',
     ])
 
     table = Table(
         rows, repeatRows=1,
-        colWidths=[8 * mm, 21 * mm, 26 * mm, 42 * mm, 16 * mm, 13 * mm,
-                   13 * mm, 22 * mm, 22 * mm, 25 * mm],
+        colWidths=[8 * mm, 19 * mm, 22 * mm, 34 * mm, 13 * mm, 10 * mm,
+                   11 * mm, 18 * mm, 16 * mm, 19 * mm, 19 * mm, 20 * mm],
     )
     table.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (-1, 0), FONT_BOLD),

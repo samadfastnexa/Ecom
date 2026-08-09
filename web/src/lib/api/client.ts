@@ -160,3 +160,61 @@ export async function apiDownload(
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+/** What `apiShare` did, so callers can tell the user something accurate. */
+export type ShareOutcome = "shared" | "cancelled" | "downloaded";
+
+/**
+ * Hand a generated PDF to the OS share sheet — WhatsApp, email, anywhere.
+ *
+ * The Web Share API only accepts files over HTTPS and only on browsers that
+ * implement `canShare({files})`, which in practice means mobile Chrome/Safari
+ * and not most desktops. Rather than hiding the button where it will not work,
+ * this falls back to a plain download so the admin always ends up with the PDF
+ * and can attach it by hand — the same compromise `lib/whatsapp.ts` documents,
+ * since a wa.me link cannot carry an attachment.
+ */
+export async function apiShare(
+  path: string,
+  fallbackName: string,
+  shareTitle: string,
+  shareText?: string
+): Promise<ShareOutcome> {
+  const headers: Record<string, string> = {};
+  if (tokenStore.access) headers["Authorization"] = `Bearer ${tokenStore.access}`;
+
+  const res = await fetch(`${API_URL}${path}`, { headers });
+  if (!res.ok) throw new ApiError("Could not fetch the document", res.status);
+
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const name = match ? match[1] : fallbackName;
+
+  const file = new File([blob], name, { type: "application/pdf" });
+  const nav = typeof navigator !== "undefined" ? navigator : undefined;
+
+  if (nav?.canShare?.({ files: [file] })) {
+    try {
+      await nav.share({ files: [file], title: shareTitle, text: shareText });
+      return "shared";
+    } catch (err) {
+      // The user dismissing the sheet throws AbortError. That is not a
+      // failure and must not trigger a fallback download they did not ask for.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return "cancelled";
+      }
+      // Anything else (permission, unsupported payload) still deserves the PDF.
+    }
+  }
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return "downloaded";
+}

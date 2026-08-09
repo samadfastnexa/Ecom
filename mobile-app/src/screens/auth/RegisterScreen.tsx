@@ -6,7 +6,12 @@ import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { GoogleSignInButton } from '../../components/GoogleSignInButton';
 import { IS_GOOGLE_SIGNIN_CONFIGURED } from '../../constants/googleConfig';
-import { API_URL } from '../../constants/config';
+import {
+  FieldLabel, FieldError, Rule, PasswordRules, isPasswordValid,
+} from '../../components/FormField';
+import {
+  AddressFields, EMPTY_ADDRESS, validateAddress, type AddressParts,
+} from '../../components/AddressFields';
 
 const BRAND_BLUE = '#0A84FF';
 const TEXT_DARK = '#1a1a1a';
@@ -17,44 +22,11 @@ const OK_GREEN = '#34C759';
 const PHONE_PATTERN = /^(?:\+92|92|0)3\d{9}$/;
 const stripPhoneSeparators = (value: string) => value.replace(/[\s\-().]/g, '');
 
-/** Small "Required" / "Optional" pill shown next to every field label. */
-const FieldLabel = ({ text, required }: { text: string; required?: boolean }) => (
-  <View style={styles.labelRow}>
-    <Text style={styles.label}>{text}</Text>
-    <View style={[styles.badge, required ? styles.badgeRequired : styles.badgeOptional]}>
-      <Text style={[styles.badgeText, required ? styles.badgeTextRequired : styles.badgeTextOptional]}>
-        {required ? 'Required' : 'Optional'}
-      </Text>
-    </View>
-  </View>
-);
-
-/** Validation message shown directly beneath the field that caused it. */
-const FieldError = ({ message }: { message?: string }) =>
-  message ? <Text style={styles.fieldError}>{message}</Text> : null;
-
-/** A single live-validated rule: grey circle until satisfied, then a green check. */
-const Rule = ({ met, text }: { met: boolean; text: string }) => (
-  <View style={styles.ruleRow}>
-    <Ionicons
-      name={met ? 'checkmark-circle' : 'ellipse-outline'}
-      size={16}
-      color={met ? OK_GREEN : '#c4c4c4'}
-    />
-    <Text style={[styles.ruleText, met && styles.ruleTextMet]}>{text}</Text>
-  </View>
-);
-
 const RegisterScreen = () => {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [houseNumber, setHouseNumber] = useState('');
-  const [portion, setPortion] = useState('');
-  const [block, setBlock] = useState('');
-  const [area, setArea] = useState('');
-  const [customArea, setCustomArea] = useState(false);
-  const [areas, setAreas] = useState<{ id: number; name: string }[]>([]);
+  const [address, setAddress] = useState<AddressParts>(EMPTY_ADDRESS);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -67,26 +39,12 @@ const RegisterScreen = () => {
   const navigation = useNavigation<any>();
 
   // ── Live validation ───────────────────────────────────────────────────────
-  const passwordRules = [
-    { key: 'length',  met: password.length >= 8,        text: t('pw_rule_length', 'At least 8 characters') },
-    { key: 'upper',   met: /[A-Z]/.test(password),      text: t('pw_rule_upper', 'One uppercase letter (A–Z)') },
-    { key: 'lower',   met: /[a-z]/.test(password),      text: t('pw_rule_lower', 'One lowercase letter (a–z)') },
-    { key: 'digit',   met: /\d/.test(password),         text: t('pw_rule_digit', 'One number (0–9)') },
-    { key: 'special', met: /[^A-Za-z0-9]/.test(password), text: t('pw_rule_special', 'One special character (!@#$…)') },
-  ];
-  const isPasswordValid = passwordRules.every(r => r.met);
+  // The rules themselves live in components/FormField so the admin's
+  // "add customer" form promises exactly the same policy this screen does.
+  const passwordValid = isPasswordValid(password);
   const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
   const isPhoneValid = PHONE_PATTERN.test(stripPhoneSeparators(phoneNumber));
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-
-  // Admin-defined localities. Public endpoint, because signup happens before
-  // there is a user. Failure is non-fatal: the field falls back to free text.
-  useEffect(() => {
-    fetch(`${API_URL}/auth/areas/`)
-      .then(res => (res.ok ? res.json() : []))
-      .then(data => Array.isArray(data) && setAreas(data))
-      .catch(() => setCustomArea(true));
-  }, []);
 
   /** Update a field and drop any stale error sitting on it. */
   const bind = (field: string, setValue: (v: string) => void) => (value: string) => {
@@ -109,11 +67,10 @@ const RegisterScreen = () => {
     if (!phoneNumber.trim()) errors.phone_number = required;
     else if (!isPhoneValid) errors.phone_number = t('phone_invalid', 'Enter a valid mobile number, e.g. 0300-1234567');
 
-    if (!houseNumber.trim()) errors.house_number = required;
-    if (!area.trim()) errors.area = required;
+    Object.assign(errors, validateAddress(address));
 
     if (!password) errors.password = required;
-    else if (!isPasswordValid) errors.password = t('password_weak', 'Your password does not meet all the requirements below');
+    else if (!passwordValid) errors.password = t('password_weak', 'Your password does not meet all the requirements below');
 
     if (!confirmPassword) errors.password_confirm = required;
     else if (password !== confirmPassword) errors.password_confirm = t('passwords_mismatch', 'Passwords do not match');
@@ -139,10 +96,10 @@ const RegisterScreen = () => {
         password,
         password_confirm: confirmPassword,
         phone_number: stripPhoneSeparators(phoneNumber),
-        house_number: houseNumber.trim(),
-        portion: portion.trim(),
-        block: block.trim(),
-        area: area.trim(),
+        house_number: address.house_number.trim(),
+        portion: address.portion,
+        block: address.block.trim(),
+        area: address.area.trim(),
       });
       // Navigation is handled by AuthContext state change or manual navigation if auto-login not implemented
     } catch (e) {
@@ -247,14 +204,10 @@ const RegisterScreen = () => {
             <FieldError message={fieldErrors.password} />
 
             {/* Live password checklist */}
-            <View style={styles.rulesBox}>
-              <Text style={styles.rulesTitle}>
-                {t('password_must_contain', 'Your password must contain:')}
-              </Text>
-              {passwordRules.map(rule => (
-                <Rule key={rule.key} met={rule.met} text={rule.text} />
-              ))}
-            </View>
+            <PasswordRules
+              password={password}
+              title={t('password_must_contain', 'Your password must contain:')}
+            />
           </View>
 
           <View style={styles.inputContainer}>
@@ -324,88 +277,23 @@ const RegisterScreen = () => {
             </Text>
           </View>
 
-          {/* House / Portion / Block share one row — they are short values
-              that belong together, and it keeps the form from running long. */}
-          <View style={styles.addressRow}>
-            <View style={styles.addressCol}>
-              <FieldLabel text={t('house_number_label', 'House')} required />
-              <TextInput
-                style={[styles.input, fieldErrors.house_number && styles.inputInvalid]}
-                placeholder={t('house_number_placeholder', 'H-12')}
-                placeholderTextColor={PLACEHOLDER}
-                value={houseNumber}
-                onChangeText={bind('house_number', setHouseNumber)}
-                maxLength={50}
-              />
-            </View>
-            <View style={styles.addressCol}>
-              <FieldLabel text={t('portion_label', 'Portion')} />
-              <TextInput
-                style={[styles.input, fieldErrors.portion && styles.inputInvalid]}
-                placeholder={t('portion_placeholder', 'Ground')}
-                placeholderTextColor={PLACEHOLDER}
-                value={portion}
-                onChangeText={bind('portion', setPortion)}
-                maxLength={50}
-              />
-            </View>
-            <View style={styles.addressCol}>
-              <FieldLabel text={t('block_label', 'Block')} />
-              <TextInput
-                style={[styles.input, fieldErrors.block && styles.inputInvalid]}
-                placeholder={t('block_placeholder', 'Block 6')}
-                placeholderTextColor={PLACEHOLDER}
-                value={block}
-                onChangeText={bind('block', setBlock)}
-                maxLength={100}
-              />
-            </View>
-          </View>
-          <FieldError message={fieldErrors.house_number || fieldErrors.portion || fieldErrors.block} />
-
+          {/* The whole address comes from the shared component, so signup and
+              the admin forms stay identical and the layout is fixed in one
+              place rather than three. */}
           <View style={styles.inputContainer}>
-            <FieldLabel text={t('area_label', 'Area')} required />
-            {areas.length > 0 && (
-              <View style={styles.areaChips}>
-                {areas.map(a => {
-                  const active = area === a.name;
-                  return (
-                    <TouchableOpacity
-                      key={a.id}
-                      style={[styles.areaChip, active && styles.areaChipActive]}
-                      onPress={() => { bind('area', setArea)(a.name); setCustomArea(false); }}
-                    >
-                      <Text style={[styles.areaChipText, active && styles.areaChipTextActive]}>
-                        {a.name}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-                <TouchableOpacity
-                  style={[styles.areaChip, customArea && styles.areaChipActive]}
-                  onPress={() => { setCustomArea(true); bind('area', setArea)(''); }}
-                >
-                  <Text style={[styles.areaChipText, customArea && styles.areaChipTextActive]}>
-                    {t('area_other', 'Other…')}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            {(customArea || areas.length === 0) && (
-              <TextInput
-                style={[styles.input, fieldErrors.area && styles.inputInvalid]}
-                placeholder={t('area_placeholder', 'Type your area')}
-                placeholderTextColor={PLACEHOLDER}
-                value={area}
-                onChangeText={bind('area', setArea)}
-                maxLength={150}
-                autoFocus={customArea}
-              />
-            )}
-            <FieldError message={fieldErrors.area} />
-            <Text style={styles.helperText}>
-              {t('address_hint', 'We use this as your default delivery address')}
-            </Text>
+            <AddressFields
+              value={address}
+              onChange={next => {
+                setAddress(next);
+                // Clear any stale per-field errors the backend sent back.
+                setFieldErrors(prev => {
+                  const { house_number, portion, block, area, ...rest } = prev;
+                  return rest;
+                });
+              }}
+              errors={fieldErrors}
+              hint={t('address_hint', 'We use this as your default delivery address')}
+            />
           </View>
 
           {(formMessage || error) && (

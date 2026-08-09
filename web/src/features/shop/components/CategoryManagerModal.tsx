@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Pencil, Trash2, Check, X, Tag, Sparkles } from "lucide-react";
+import { Plus, Pencil, Trash2, Check, X, Tag, Sparkles, Eye, EyeOff } from "lucide-react";
 import type { Category } from "@/lib/types";
 import { adminCategoriesApi, categoriesApi } from "@/lib/api";
-import { Button, Input, Modal, Skeleton, useToast } from "@/components/ui";
+import { Button, Chip, Input, Modal, Skeleton, useToast } from "@/components/ui";
 import { useAsync } from "@/hooks/useAsync";
 
 interface CategoryManagerModalProps {
@@ -17,7 +17,9 @@ interface CategoryManagerModalProps {
 
 export function CategoryManagerModal({ open, onClose, onChanged }: CategoryManagerModalProps) {
   const notify = useToast();
-  // Refetch each time the modal opens so the list is always current.
+  // Refetch each time the modal opens so the list is always current. No
+  // `active` filter on purpose: staff get every category, hidden ones
+  // included, which is the only way to reach one and switch it back on.
   const cats = useAsync(() => categoriesApi.list(), [open]);
 
   const [newName, setNewName] = useState("");
@@ -61,6 +63,7 @@ export function CategoryManagerModal({ open, onClose, onChanged }: CategoryManag
             <div className="min-w-[150px] flex-1">
               <Input
                 label="Name"
+                requirement="required"
                 placeholder="e.g. Water Bottles"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
@@ -68,9 +71,10 @@ export function CategoryManagerModal({ open, onClose, onChanged }: CategoryManag
                 icon={<Tag size={15} />}
               />
             </div>
-            <div className="w-32">
+            <div className="w-36">
               <Input
                 label="Icon"
+                requirement="optional"
                 placeholder="e.g. water"
                 value={newIcon}
                 onChange={(e) => setNewIcon(e.target.value)}
@@ -83,7 +87,7 @@ export function CategoryManagerModal({ open, onClose, onChanged }: CategoryManag
             </Button>
           </div>
           <p className="mt-1.5 text-[11px] text-mist/40">
-            Icon (optional) is an Expo Vector Icons name, used by the mobile app.
+            The icon is an Expo Vector Icons name, used by the mobile app.
           </p>
         </div>
 
@@ -111,7 +115,9 @@ export function CategoryManagerModal({ open, onClose, onChanged }: CategoryManag
         )}
 
         <p className="text-[11px] text-mist/40">
-          Deleting a category keeps its products — they simply become uncategorised.
+          Hiding a category takes it off the shop and out of the product form, but
+          products already filed under it keep it. Deleting is permanent and leaves
+          those products uncategorised.
         </p>
 
         <div className="pt-1">
@@ -140,6 +146,7 @@ function CategoryRow({
   const [icon, setIcon] = useState(category.icon || "");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [toggling, setToggling] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const startEdit = () => {
@@ -167,20 +174,34 @@ function CategoryRow({
     }
   };
 
-  const remove = async () => {
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      return;
+  /** Retire / restore a category without touching the products filed under it. */
+  const toggleActive = async (next: boolean) => {
+    setToggling(true);
+    try {
+      await adminCategoriesApi.update(category.id, { is_active: next });
+      notify(
+        next
+          ? `"${category.name}" is visible to customers again.`
+          : `"${category.name}" is hidden — its products keep it.`
+      );
+      onChanged();
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Could not change visibility.", "error");
+    } finally {
+      setToggling(false);
     }
+  };
+
+  const remove = async () => {
     setDeleting(true);
     try {
       await adminCategoriesApi.delete(category.id);
       notify("Category deleted.");
       onChanged();
     } catch (e) {
+      // Keep the confirmation open so the choice (delete vs. hide) is still there.
       notify(e instanceof Error ? e.message : "Delete failed.", "error");
       setDeleting(false);
-      setConfirmDelete(false);
     }
   };
 
@@ -190,14 +211,16 @@ function CategoryRow({
         <div className="min-w-[140px] flex-1">
           <Input
             label="Name"
+            requirement="required"
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && save()}
           />
         </div>
-        <div className="w-28">
+        <div className="w-36">
           <Input
             label="Icon"
+            requirement="optional"
             value={icon}
             onChange={(e) => setIcon(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && save()}
@@ -213,50 +236,93 @@ function CategoryRow({
     );
   }
 
+  if (confirmDelete) {
+    return (
+      <div className="rounded-xl border border-rose-400/30 bg-rose-500/5 p-3">
+        <p className="text-sm font-medium text-mist">
+          Delete &ldquo;{category.name}&rdquo;?
+        </p>
+        <p className="mt-1 text-xs text-mist/60">
+          Every product filed under it loses its category — that cannot be undone.
+          To retire it without touching the products, hide it instead: a hidden
+          category disappears from the shop and the product form but stays on the
+          products that already use it.
+        </p>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <Button variant="danger" onClick={remove} loading={deleting}>
+            <Trash2 size={14} /> Delete anyway
+          </Button>
+          {category.is_active && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setConfirmDelete(false);
+                toggleActive(false);
+              }}
+              disabled={deleting}
+            >
+              <EyeOff size={14} /> Hide instead
+            </Button>
+          )}
+          <Button variant="ghost" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5">
+    <div
+      className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 transition ${
+        category.is_active
+          ? "border-white/10 bg-white/5"
+          : "border-white/5 bg-white/[0.02] opacity-60"
+      }`}
+    >
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-mist">{category.name}</p>
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-medium text-mist">{category.name}</p>
+          {!category.is_active && <Chip className="shrink-0">Hidden</Chip>}
+        </div>
         <p className="truncate text-xs text-mist/40">
           {category.icon ? `icon: ${category.icon} · ` : ""}
           /{category.slug}
         </p>
       </div>
 
-      {confirmDelete ? (
-        <div className="flex items-center gap-1">
-          <button
-            disabled={deleting}
-            onClick={remove}
-            className="rounded px-2 py-0.5 text-xs font-medium text-rose-300 hover:bg-rose-400/10"
-          >
-            {deleting ? "…" : "Confirm delete"}
-          </button>
-          <button
-            onClick={() => setConfirmDelete(false)}
-            className="rounded px-2 py-0.5 text-xs text-mist/50 hover:bg-white/10"
-          >
-            Cancel
-          </button>
-        </div>
-      ) : (
-        <div className="flex items-center gap-1">
-          <button
-            onClick={startEdit}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-mist/50 transition hover:bg-white/10 hover:text-wave"
-            title="Edit category"
-          >
-            <Pencil size={14} />
-          </button>
-          <button
-            onClick={remove}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-mist/40 transition hover:bg-rose-400/10 hover:text-rose-300"
-            title="Delete category"
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
-      )}
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => toggleActive(!category.is_active)}
+          disabled={toggling}
+          className={`flex h-7 w-7 items-center justify-center rounded-lg transition disabled:opacity-50 ${
+            category.is_active
+              ? "text-emerald-300 hover:bg-emerald-400/10"
+              : "text-amber-300 hover:bg-amber-400/10"
+          }`}
+          title={
+            category.is_active
+              ? "Visible to customers — click to hide"
+              : "Hidden from customers — click to show"
+          }
+        >
+          {category.is_active ? <Eye size={14} /> : <EyeOff size={14} />}
+        </button>
+        <button
+          onClick={startEdit}
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-mist/50 transition hover:bg-white/10 hover:text-wave"
+          title="Edit category"
+        >
+          <Pencil size={14} />
+        </button>
+        <button
+          onClick={() => setConfirmDelete(true)}
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-mist/40 transition hover:bg-rose-400/10 hover:text-rose-300"
+          title="Delete category"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
     </div>
   );
 }

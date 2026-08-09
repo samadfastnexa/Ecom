@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Tag, FileText, DollarSign } from "lucide-react";
-import type { Category, Product } from "@/lib/types";
+import type { Product } from "@/lib/types";
 import type { ProductInput } from "@/lib/api/products";
 import { adminProductsApi, categoriesApi } from "@/lib/api";
-import { Button, Input, Modal, MultiImagePicker, useToast } from "@/components/ui";
+import { Button, FieldLabel, Input, Modal, MultiImagePicker, useToast } from "@/components/ui";
 import { useAsync } from "@/hooks/useAsync";
 
 interface ProductFormModalProps {
@@ -17,7 +17,10 @@ interface ProductFormModalProps {
 
 export function ProductFormModal({ open, product, onClose, onSaved }: ProductFormModalProps) {
   const notify = useToast();
-  const categories = useAsync(() => categoriesApi.list(), []);
+  // Active only: a retired category must never be picked for a product.
+  // Refetched on open so a category hidden from the manager modal disappears
+  // here without a page reload.
+  const categories = useAsync(() => categoriesApi.list({ active: true }), [open]);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -30,6 +33,24 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const isEdit = !!product;
+
+  // The product being edited may already sit in a category that has since been
+  // hidden. Dropping it from the picker would reset the field to "no category"
+  // and silently wipe it on save, so keep it as an extra, clearly-marked
+  // option — it stays selected unless the user picks something else.
+  const currentCategory = product?.category_details ?? null;
+  const activeCategories = useMemo(() => categories.data ?? [], [categories.data]);
+  const categoryOptions = useMemo(
+    () =>
+      currentCategory && !activeCategories.some((c) => c.id === currentCategory.id)
+        ? [...activeCategories, currentCategory]
+        : activeCategories,
+    [activeCategories, currentCategory]
+  );
+  const selectedIsHidden =
+    categoryId !== "" &&
+    !categories.loading &&
+    !activeCategories.some((c) => c.id === categoryId);
 
   // Populate form when editing
   useEffect(() => {
@@ -105,6 +126,7 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
         {/* Name */}
         <Input
           label="Product name"
+          requirement="required"
           placeholder="e.g. 20L Water Bottle"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -114,12 +136,15 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
 
         {/* Description */}
         <div>
-          <label className="label">Description (optional)</label>
+          <FieldLabel htmlFor="product-description" requirement="optional">
+            Description
+          </FieldLabel>
           <div className="relative">
             <span className="absolute left-3.5 top-3 text-mist/40">
               <FileText size={15} />
             </span>
             <textarea
+              id="product-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Short product description…"
@@ -133,6 +158,7 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
         <div className="grid grid-cols-2 gap-3">
           <Input
             label="Price (Rs.)"
+            requirement="required"
             placeholder="0.00"
             type="number"
             min="0"
@@ -143,17 +169,28 @@ export function ProductFormModal({ open, product, onClose, onSaved }: ProductFor
             error={errors.price}
           />
           <div>
-            <label className="label">Category (optional)</label>
+            <FieldLabel htmlFor="product-category" requirement="optional">
+              Category
+            </FieldLabel>
             <select
+              id="product-category"
               value={categoryId}
               onChange={(e) => setCategoryId(e.target.value ? Number(e.target.value) : "")}
               className="input text-sm"
             >
               <option value="">— No category —</option>
-              {categories.data?.map((c: Category) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+              {categoryOptions.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {activeCategories.some((a) => a.id === c.id) ? c.name : `${c.name} (hidden)`}
+                </option>
               ))}
             </select>
+            {selectedIsHidden && (
+              <p className="mt-1 text-[11px] text-amber-300/80">
+                This category is hidden from customers. It stays on the product
+                until you pick another one.
+              </p>
+            )}
           </div>
         </div>
 

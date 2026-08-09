@@ -549,3 +549,74 @@ class PruneRiderPingsTests(RiderLocationTestMixin, TestCase):
         )
         call_command('prune_rider_pings', stdout=StringIO())
         self.assertTrue(RiderLocation.objects.filter(rider=self.rider).exists())
+
+
+class LocationHardeningTests(RiderLocationTestMixin, TestCase):
+    """Regression tests from the tracking feature's security review."""
+
+    def test_absurd_exponent_is_a_400_not_a_500(self):
+        """Decimal('1E+400').quantize() raises InvalidOperation — that used to
+        escape the serializer as an HTTP 500."""
+        self.client.force_authenticate(self.rider)
+        res = self.client.post(
+            POST_URL, {'latitude': '1E+400', 'longitude': LNG}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(RiderLocationPing.objects.count(), 0)
+
+    def test_giant_integer_is_a_400_not_a_500(self):
+        """31 significant digits overflow the default decimal context on
+        quantize, the other route to the same 500."""
+        self.client.force_authenticate(self.rider)
+        res = self.client.post(
+            POST_URL, {'latitude': '1' * 31, 'longitude': LNG}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(RiderLocationPing.objects.count(), 0)
+
+    def test_fix_older_than_the_retention_window_is_rejected(self):
+        """A badly wrong device clock must not smear the trail back through
+        history that the pruner would delete on sight anyway."""
+        retention = TrackingSettings.load().trail_retention_days
+        self.client.force_authenticate(self.rider)
+        res = self.client.post(POST_URL, {
+            'latitude': LAT, 'longitude': LNG,
+            'recorded_at': (
+                timezone.now() - timedelta(days=retention + 1)
+            ).isoformat(),
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(RiderLocationPing.objects.count(), 0)
+
+    def test_fix_inside_the_retention_window_is_accepted(self):
+        retention = TrackingSettings.load().trail_retention_days
+        self.client.force_authenticate(self.rider)
+        res = self.client.post(POST_URL, {
+            'latitude': LAT, 'longitude': LNG,
+            'recorded_at': (
+                timezone.now() - timedelta(days=retention - 1)
+            ).isoformat(),
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+    def test_trail_rows_carry_created_at(self):
+        """Admins need both clocks: when the fix was taken AND when it arrived,
+        or an offline flush is indistinguishable from live reporting."""
+        ping = RiderLocationPing.objects.create(
+            rider=self.rider, latitude=Decimal(LAT), longitude=Decimal(LNG),
+            recorded_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.admin)
+        row = self.client.get(self.trail_url()).data['results'][0]
+        self.assertEqual(row['id'], ping.id)
+        self.assertIn('created_at', row)
+        self.assertIsNotNone(row['created_at'])
+
+    def test_minutes_ago_clamps_at_zero_for_a_fast_device_clock(self):
+        """A device clock slightly ahead of ours (inside the skew tolerance)
+        must not surface as a negative minutes_ago."""
+        location = RiderLocation.objects.create(
+            rider=self.rider, latitude=Decimal(LAT), longitude=Decimal(LNG),
+            recorded_at=timezone.now() + timedelta(minutes=2),
+        )
+        self.assertEqual(location.minutes_ago, 0.0)

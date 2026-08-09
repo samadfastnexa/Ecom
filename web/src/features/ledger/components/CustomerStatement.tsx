@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  ArrowLeft, Download, MessageCircle, Package, TrendingDown, TrendingUp, Wallet,
+  ArrowLeft, Download, MessageCircle, Package, Share2, TrendingDown, TrendingUp, Wallet,
 } from "lucide-react";
 import type { StatementFilters } from "@/lib/types";
 import { formatPrice } from "@/lib/format";
@@ -43,6 +43,7 @@ export function CustomerStatement({ userId, onBack }: CustomerStatementProps) {
   const [filters, setFilters] = useState<StatementFilters>({});
   const [payOpen, setPayOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const statement = useStatement(userId, filters);
 
   if (statement.loading) {
@@ -80,6 +81,26 @@ export function CustomerStatement({ userId, onBack }: CustomerStatementProps) {
     }
   };
 
+  const share = async () => {
+    setSharing(true);
+    try {
+      const outcome = await ledgerApi.shareStatement(
+        userId, customer.username, customer.name, filters,
+      );
+      // Desktop browsers cannot share files, so say what actually happened
+      // rather than claiming it was sent.
+      if (outcome === "downloaded") {
+        notify("Statement downloaded — attach it to your message.");
+      } else if (outcome === "shared") {
+        notify("Statement shared.");
+      }
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Could not share the statement.", "error");
+    } finally {
+      setSharing(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-5">
       <button
@@ -105,6 +126,9 @@ export function CustomerStatement({ userId, onBack }: CustomerStatementProps) {
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => setPayOpen(true)}>
             <Wallet size={15} /> Record payment
+          </Button>
+          <Button variant="ghost" onClick={share} loading={sharing}>
+            <Share2 size={15} /> Send statement
           </Button>
           <Button variant="ghost" onClick={download} loading={downloading}>
             <Download size={15} /> Statement PDF

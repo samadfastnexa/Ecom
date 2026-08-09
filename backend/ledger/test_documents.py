@@ -134,6 +134,85 @@ class LedgerStatementTests(LedgerTestMixin, TestCase):
         self.assertEqual(plant['closing_balance'], Decimal('900'))
 
 
+class LedgerDiscountColumnTests(LedgerTestMixin, TestCase):
+    """The Gross / Discount / Net display columns on statements."""
+
+    def setUp(self):
+        super().setUp()
+        from accounts.models import DiscountCategory
+        from plant.models import DeliveryRecord
+
+        wholesale = DiscountCategory.objects.create(
+            name='Wholesale', discount_type='fixed', discount_value=Decimal('30'),
+        )
+        self.customer.profile.discount_category = wholesale
+        self.customer.profile.save(update_fields=['discount_category'])
+
+        # A discounted bottle round: gross 360, discount 60, net 300.
+        self.record = DeliveryRecord.objects.create(
+            customer=self.customer, house='355-F', bottles=2,
+            unit_price=Decimal('180.00'),
+        )
+        service.sync_delivery_record(self.record)
+        service.record_payment(customer=self.customer, amount=Decimal('300'))
+
+    def test_charge_row_carries_gross_and_discount(self):
+        data = build_statement(self.customer)
+        charge = next(r for r in data['rows'] if r.entry_type == LedgerEntry.PLANT_CHARGE)
+        self.assertEqual(charge.amount, Decimal('-300.00'))   # NET, invariant intact
+        self.assertEqual(charge.gross_amount, Decimal('360.00'))
+        self.assertEqual(charge.discount_amount, Decimal('60.00'))
+        self.assertEqual(charge.discount_category_name, 'Wholesale')
+
+    def test_undiscounted_rows_leave_the_columns_blank(self):
+        """Blank means NULL — the statement must not print 0.00 there."""
+        data = build_statement(self.customer)
+        payment = next(r for r in data['rows'] if r.entry_type == LedgerEntry.PAYMENT)
+        self.assertIsNone(payment.gross_amount)
+        self.assertIsNone(payment.discount_amount)
+        self.assertEqual(payment.discount_category_name, '')
+
+    def test_totals_include_gross_and_discount(self):
+        totals = build_statement(self.customer)['totals']
+        self.assertEqual(totals['gross'], Decimal('360.00'))
+        self.assertEqual(totals['discount'], Decimal('60.00'))
+        self.assertEqual(totals['debit'], Decimal('300.00'))  # net stays the debit
+
+    def test_statement_api_exposes_the_columns(self):
+        client = APIClient()
+        client.force_authenticate(self.admin)
+        res = client.get(f'/api/ledger/customers/{self.customer.pk}/statement/')
+        self.assertEqual(res.status_code, 200)
+        by_type = {r['entry_type']: r for r in res.data['results']}
+        charge = by_type['plant_charge']
+        self.assertEqual(Decimal(charge['gross_amount']), Decimal('360.00'))
+        self.assertEqual(Decimal(charge['discount_amount']), Decimal('60.00'))
+        self.assertEqual(charge['discount_category_name'], 'Wholesale')
+        payment = by_type['payment']
+        self.assertIsNone(payment['gross_amount'])
+        self.assertIsNone(payment['discount_amount'])
+
+    def test_statement_pdf_renders_with_discount_columns(self):
+        pdf = render_statement(build_statement(self.customer))
+        self.assertTrue(pdf.startswith(b'%PDF'))
+        self.assertGreater(len(pdf), 1000)
+
+    def test_invariant_holds_after_discounted_charge_and_payment(self):
+        self.assertEqual(self.balance(self.customer), Decimal('0.00'))
+        self.assertLedgerConsistent(self.customer)
+
+    def test_category_edit_after_billing_changes_no_ledger_row(self):
+        """Re-syncing after a category edit must post nothing new."""
+        from accounts.models import DiscountCategory
+        before = list(LedgerEntry.objects.values_list('pk', 'amount'))
+
+        DiscountCategory.objects.filter(name='Wholesale').update(discount_value=99)
+        service.sync_delivery_record(self.record)  # idempotent: net unchanged
+
+        self.assertEqual(list(LedgerEntry.objects.values_list('pk', 'amount')), before)
+        self.assertLedgerConsistent(self.customer)
+
+
 class LedgerPdfTests(LedgerTestMixin, TestCase):
 
     def test_statement_renders_a_pdf(self):

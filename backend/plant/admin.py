@@ -19,12 +19,15 @@ class BottleTypeAdmin(admin.ModelAdmin):
 @admin.register(DeliveryRecord)
 class DeliveryRecordAdmin(admin.ModelAdmin):
     list_display = (
-        'date', 'house', 'customer', 'bottles', 'unit_price', 'amount', 'paid',
+        'date', 'house', 'customer', 'bottles', 'unit_price',
+        'discount_amount', 'amount', 'paid',
     )
     list_filter = ('date', 'paid')
     search_fields = ('house', 'customer__username', 'notes')
     date_hierarchy = 'date'
-    readonly_fields = ('amount', 'created_by', 'created_at', 'updated_at')
+    # gross/discount are derived by save() from the frozen snapshot.
+    readonly_fields = ('amount', 'gross_amount', 'discount_amount',
+                       'created_by', 'created_at', 'updated_at')
 
     def save_model(self, request, obj, form, change):
         if not obj.pk and not obj.created_by:

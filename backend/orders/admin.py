@@ -40,12 +40,23 @@ class OrderAdmin(admin.ModelAdmin):
     list_filter = ('status', 'is_paid', 'created_at', 'assigned_delivery_boy')
     search_fields = ('user__username', 'user__email', 'shipping_address', 'id')
     list_editable = ('status', 'is_paid')
-    readonly_fields = ('created_at', 'updated_at', 'delivery_assigned_at', 'delivery_completed_at')
+    # The discount snapshot was frozen at billing time; editing it here would
+    # desync the receipt from what was actually charged.
+    readonly_fields = ('created_at', 'updated_at', 'delivery_assigned_at', 'delivery_completed_at',
+                       'gross_amount', 'discount_amount', 'discount_category',
+                       'discount_category_name', 'discount_type', 'discount_value',
+                       'discount_overridden')
     inlines = [OrderItemInline]
-    
+
     fieldsets = (
         ('Order Information', {
             'fields': ('user', 'total_price', 'status', 'is_paid')
+        }),
+        ('Discount (frozen at billing)', {
+            'fields': ('gross_amount', 'discount_amount', 'discount_category',
+                       'discount_category_name', 'discount_type', 'discount_value',
+                       'discount_overridden'),
+            'classes': ('collapse',)
         }),
         ('Shipping & Payment', {
             'fields': ('shipping_address', 'payment_method', 'payment_number')

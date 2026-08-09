@@ -68,11 +68,17 @@ export function shareCustomerStatement(
   if (range?.start) params.set('start', range.start);
   if (range?.end) params.set('end', range.end);
   const query = params.toString();
-  const safeName = customerName.replace(/[^a-zA-Z0-9]+/g, '-').slice(0, 40) || 'customer';
+  const safeName = customerName
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'customer';
+  // Dated, because the recipient keeps the file: two statements for the same
+  // customer must not collide in a WhatsApp thread or a downloads folder.
+  const asOf = range?.end || new Date().toISOString().slice(0, 10);
 
   return downloadAndShare(
     `/ledger/customers/${userId}/statement.pdf${query ? `?${query}` : ''}`,
-    `statement-${safeName}.pdf`,
+    `statement-${safeName}-${asOf}.pdf`,
     `Statement — ${customerName}`,
   );
 }

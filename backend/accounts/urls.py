@@ -1,14 +1,19 @@
-from django.urls import path
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
 from .views import (
+    CustomerAddressViewSet,
     AreaListView, AdminAreaListCreateView, AdminAreaDetailView,
+    AdminDiscountCategoryListCreateView, AdminDiscountCategoryDetailView,
+    DiscountReportView,
     RegisterView, UserProfileView, ChangePasswordView, UpdatePushTokenView,
     AdminStaffListCreateView, AdminStaffDetailView,
     AdminStaffDocumentView, AdminStaffHistoryView,
     AdminCustomerListView, AdminCustomerCreateView, AdminCustomerDetailView,
+    CustomerLocationView,
     AdminResetPasswordView, AdminSendNotificationView, AdminNotificationHistoryView,
     NotificationTemplateListCreateView, NotificationTemplateDetailView,
     GoogleAuthView, MobileProfileConfigView, AdminMobileProfileConfigView,
@@ -16,18 +21,36 @@ from .views import (
     TrackingConfigView,
 )
 
+router = DefaultRouter()
+# The signed-in customer's own address book: list/create/update/delete plus
+# POST <id>/set_default/. Scoped to request.user inside the viewset.
+router.register(r'addresses', CustomerAddressViewSet, basename='customer-address')
+
 urlpatterns = [
+    path('', include(router.urls)),
     path('register/', RegisterView.as_view(), name='register'),
     # Public — powers the signup form's area dropdown
     path('areas/', AreaListView.as_view(), name='area-list'),
     path('admin/areas/', AdminAreaListCreateView.as_view(), name='admin-area-list'),
     path('admin/areas/<int:pk>/', AdminAreaDetailView.as_view(), name='admin-area-detail'),
+
+    # Customer discount categories — staff-only, deliberately no public list
+    path('admin/discount-categories/', AdminDiscountCategoryListCreateView.as_view(),
+         name='admin-discount-category-list'),
+    path('admin/discount-categories/report/', DiscountReportView.as_view(),
+         name='admin-discount-report'),
+    path('admin/discount-categories/<int:pk>/', AdminDiscountCategoryDetailView.as_view(),
+         name='admin-discount-category-detail'),
     path('google/', GoogleAuthView.as_view(), name='google_auth'),
     path('login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('profile/', UserProfileView.as_view(), name='profile'),
     path('change-password/', ChangePasswordView.as_view(), name='change_password'),
     path('device/', UpdatePushTokenView.as_view(), name='update_device_token'),
+
+    # Customer delivery pin — staff or the currently-assigned rider
+    path('customers/<int:user_id>/location/', CustomerLocationView.as_view(),
+         name='customer-location'),
 
     # Admin customer management
     path('admin/customers/', AdminCustomerListView.as_view(), name='admin-customer-list'),

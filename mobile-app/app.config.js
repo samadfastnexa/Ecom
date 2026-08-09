@@ -72,6 +72,11 @@ module.exports = {
     plugins: [
       "expo-web-browser",
       "expo-notifications",
+      // Backs the "remember me" password with the Keychain / Keystore. The
+      // plugin's default also excludes those entries from Android auto-backup,
+      // which matters because a restored ciphertext cannot be decrypted on a
+      // different device and would surface as a corrupt saved login.
+      "expo-secure-store",
       // The iOS strings are what an App Store reviewer reads before deciding
       // whether "always" is justified, so they name the job (delivery
       // dispatch) rather than describing the permission back to the user.

@@ -1,12 +1,13 @@
+from decimal import Decimal
 from unittest import mock
 
 from django.core.cache import cache
 from django.test import TestCase, override_settings
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Permission, User
 from rest_framework.test import APIClient
 from rest_framework import status
 from rest_framework import status as http_status
-from accounts.models import Area
+from accounts.models import Area, DiscountCategory, line_discount_amount
 
 class AuthenticationTests(TestCase):
     def setUp(self):
@@ -39,11 +40,13 @@ class AuthenticationTests(TestCase):
         profile = User.objects.get(username='testuser').profile
         self.assertEqual(profile.phone_number, '03001234567')  # normalized
         self.assertEqual(profile.house_number, 'H-12')
-        self.assertEqual(profile.portion, 'Ground Floor')
+        # Portion is a fixed list now: the posted 'Ground Floor' is normalised
+        # to the canonical key, and the composed line carries its label.
+        self.assertEqual(profile.portion, 'ground')
         self.assertEqual(profile.block, 'Block 6')
         self.assertEqual(profile.area, 'Gulshan-e-Iqbal')
         self.assertEqual(
-            profile.address, 'H-12, Ground Floor, Block 6, Gulshan-e-Iqbal'
+            profile.address, 'H-12, Ground, Block 6, Gulshan-e-Iqbal'
         )
 
     def test_portion_is_optional(self):
@@ -361,3 +364,272 @@ class AreaTests(TestCase):
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
         self.assertEqual(User.objects.get(username='noblock').profile.address,
                          'H-9, Johar Town')
+
+
+class DiscountMathTests(TestCase):
+    """The per-line arithmetic every billing path shares."""
+
+    def test_fixed_discount_is_per_unit(self):
+        # The worked example: 19L bottle Rs 180, Wholesale Rs 30 off → 150/line.
+        self.assertEqual(line_discount_amount('fixed', 30, 1, Decimal('180')), Decimal('30.00'))
+        self.assertEqual(line_discount_amount('fixed', 30, 5, Decimal('180')), Decimal('150.00'))
+
+    def test_percentage_of_the_line_gross(self):
+        self.assertEqual(
+            line_discount_amount('percentage', 10, 2, Decimal('180')), Decimal('36.00')
+        )
+
+    def test_percentage_rounds_half_up_not_bankers(self):
+        # 2.5% of 125 = 3.125 — banker's rounding would give 3.12.
+        self.assertEqual(
+            line_discount_amount('percentage', Decimal('2.5'), 1, Decimal('125')),
+            Decimal('3.13'),
+        )
+
+    def test_fixed_discount_capped_at_line_gross(self):
+        """A discount can never push a line below zero."""
+        self.assertEqual(
+            line_discount_amount('fixed', 500, 1, Decimal('180')), Decimal('180.00')
+        )
+
+    def test_zero_quantity_or_price_gives_no_discount(self):
+        self.assertEqual(line_discount_amount('fixed', 30, 0, Decimal('180')), Decimal('0.00'))
+        self.assertEqual(line_discount_amount('fixed', 30, 3, Decimal('0')), Decimal('0.00'))
+
+    def test_inactive_or_missing_category_does_not_bill(self):
+        user = User.objects.create_user(username='dc1', password='Pass1234!')
+        self.assertIsNone(DiscountCategory.for_customer(user))
+        category = DiscountCategory.objects.create(
+            name='Wholesale', discount_type='fixed', discount_value=30, is_active=False,
+        )
+        user.profile.discount_category = category
+        user.profile.save(update_fields=['discount_category'])
+        self.assertIsNone(DiscountCategory.for_customer(User.objects.get(pk=user.pk)))
+        category.is_active = True
+        category.save()
+        self.assertEqual(
+            DiscountCategory.for_customer(User.objects.get(pk=user.pk)), category
+        )
+
+
+class DiscountCategoryCrudTests(TestCase):
+    """Admin CRUD over /api/auth/admin/discount-categories/."""
+
+    URL = '/api/auth/admin/discount-categories/'
+
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            username='discadmin', password='Pass1234!', is_staff=True
+        )
+        self.customer = User.objects.create_user(username='disccust', password='Pass1234!')
+        self.wholesale = DiscountCategory.objects.create(
+            name='Wholesale', discount_type='fixed', discount_value=Decimal('30'),
+        )
+
+    def test_staff_can_create_and_list(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(self.URL, {
+            'name': 'Masjid', 'discount_type': 'percentage', 'discount_value': '10',
+            'description': 'Free-will community rate',
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        listing = self.client.get(self.URL)
+        self.assertEqual(listing.status_code, status.HTTP_200_OK)
+        self.assertIn('Masjid', [c['name'] for c in listing.data])
+
+    def test_customer_gets_403(self):
+        self.client.force_authenticate(self.customer)
+        self.assertEqual(self.client.get(self.URL).status_code, 403)
+        self.assertEqual(
+            self.client.post(self.URL, {
+                'name': 'Mine', 'discount_type': 'fixed', 'discount_value': '999',
+            }, format='json').status_code,
+            403,
+        )
+
+    def test_anonymous_is_rejected(self):
+        res = self.client.get(self.URL)
+        self.assertIn(res.status_code, (401, 403))
+
+    def test_percentage_over_100_rejected(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(self.URL, {
+            'name': 'Broken', 'discount_type': 'percentage', 'discount_value': '101',
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('discount_value', res.data)
+
+    def test_negative_value_rejected(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(self.URL, {
+            'name': 'Negative', 'discount_type': 'fixed', 'discount_value': '-5',
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_duplicate_name_rejected_case_insensitively(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.post(self.URL, {
+            'name': 'wholesale', 'discount_type': 'fixed', 'discount_value': '10',
+        }, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_update_and_deactivate(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.patch(
+            f'{self.URL}{self.wholesale.pk}/',
+            {'discount_value': '35', 'is_active': False}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.wholesale.refresh_from_db()
+        self.assertEqual(self.wholesale.discount_value, Decimal('35.00'))
+        self.assertFalse(self.wholesale.is_active)
+
+    def test_delete_in_use_fails_loudly(self):
+        """PROTECT: deleting must not silently null customers' discounts."""
+        self.customer.profile.discount_category = self.wholesale
+        self.customer.profile.save(update_fields=['discount_category'])
+        self.client.force_authenticate(self.admin)
+        res = self.client.delete(f'{self.URL}{self.wholesale.pk}/')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('reassign', res.data['detail'].lower())
+        self.assertTrue(DiscountCategory.objects.filter(pk=self.wholesale.pk).exists())
+
+    def test_delete_unused_succeeds(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.delete(f'{self.URL}{self.wholesale.pk}/')
+        self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(DiscountCategory.objects.filter(pk=self.wholesale.pk).exists())
+
+
+class DiscountAssignmentTests(TestCase):
+    """Assigning a category to a customer, and hiding it from that customer."""
+
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            username='assignadmin', password='Pass1234!', is_staff=True
+        )
+        self.customer = User.objects.create_user(username='assigncust', password='Pass1234!')
+        self.customer.profile.user_type = 'customer'
+        self.customer.profile.save()
+        self.wholesale = DiscountCategory.objects.create(
+            name='Wholesale', discount_type='fixed', discount_value=Decimal('30'),
+        )
+        self.url = f'/api/auth/admin/customers/{self.customer.pk}/'
+
+    def test_admin_assigns_and_clears_category(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.patch(self.url, {'discount_category': self.wholesale.pk}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['discount_category'], self.wholesale.pk)
+        self.assertEqual(res.data['discount_category_name'], 'Wholesale')
+
+        res = self.client.patch(self.url, {'discount_category': None}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIsNone(res.data['discount_category'])
+
+    def test_assignment_change_is_audited(self):
+        from activities.models import ActivityLog
+        self.client.force_authenticate(self.admin)
+        self.client.patch(self.url, {'discount_category': self.wholesale.pk}, format='json')
+        row = ActivityLog.objects.filter(action='Discount Category Assigned').first()
+        self.assertIsNotNone(row)
+        self.assertEqual(row.details['to'], 'Wholesale')
+
+    def test_unknown_category_rejected(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.patch(self.url, {'discount_category': 999999}, format='json')
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_customer_profile_never_reveals_the_assignment(self):
+        """The assignment field must be absent from the JSON keys, not null."""
+        self.customer.profile.discount_category = self.wholesale
+        self.customer.profile.save(update_fields=['discount_category'])
+        self.client.force_authenticate(self.customer)
+        res = self.client.get('/api/auth/profile/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        for key in ('discount_category', 'discount_category_id', 'discount_category_name'):
+            self.assertNotIn(key, res.data.keys())
+
+    def test_customer_cannot_self_assign_via_profile_update(self):
+        self.client.force_authenticate(self.customer)
+        res = self.client.patch(
+            '/api/auth/profile/', {'discount_category': self.wholesale.pk}, format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)  # field silently ignored
+        self.customer.profile.refresh_from_db()
+        self.assertIsNone(self.customer.profile.discount_category)
+
+    def test_profile_reports_override_capability_flag(self):
+        perm = Permission.objects.get(codename='can_override_discount')
+        self.admin.user_permissions.add(perm)
+        self.client.force_authenticate(User.objects.get(pk=self.admin.pk))
+        self.assertTrue(self.client.get('/api/auth/profile/').data['can_override_discount'])
+        self.client.force_authenticate(self.customer)
+        self.assertFalse(self.client.get('/api/auth/profile/').data['can_override_discount'])
+
+
+class DiscountReportTests(TestCase):
+    """Per-category totals over a date range — staff-only."""
+
+    URL = '/api/auth/admin/discount-categories/report/'
+
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            username='repadmin', password='Pass1234!', is_staff=True
+        )
+        self.customer = User.objects.create_user(username='repcust', password='Pass1234!')
+        self.customer.profile.user_type = 'customer'
+        self.customer.profile.save()
+        self.wholesale = DiscountCategory.objects.create(
+            name='Wholesale', discount_type='fixed', discount_value=Decimal('30'),
+        )
+        self.customer.profile.discount_category = self.wholesale
+        self.customer.profile.save(update_fields=['discount_category'])
+
+        from orders.models import Order
+        from plant.models import DeliveryRecord
+        Order.objects.create(
+            user=self.customer, total_price=Decimal('300.00'),
+            gross_amount=Decimal('360.00'), discount_amount=Decimal('60.00'),
+            discount_category=self.wholesale, discount_category_name='Wholesale',
+            discount_type='fixed', discount_value=Decimal('30'),
+            shipping_address='H-12', status='Processing',
+        )
+        DeliveryRecord.objects.create(
+            customer=self.customer, house='H-12',
+            bottles=2, unit_price=Decimal('180.00'),
+        )
+
+    def test_customer_gets_403(self):
+        self.client.force_authenticate(self.customer)
+        self.assertEqual(self.client.get(self.URL).status_code, 403)
+
+    def test_totals_combine_orders_and_plant_records(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.get(self.URL)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['count'], 1)
+        row = res.data['results'][0]
+        self.assertEqual(row['name'], 'Wholesale')
+        self.assertEqual(row['customers_assigned'], 1)
+        self.assertEqual(row['orders_discounted'], 1)
+        self.assertEqual(row['records_discounted'], 1)
+        self.assertEqual(Decimal(row['gross']), Decimal('720.00'))
+        self.assertEqual(Decimal(row['discount_given']), Decimal('120.00'))
+        self.assertEqual(Decimal(row['net']), Decimal('600.00'))
+
+    def test_date_range_filters_out_activity(self):
+        self.client.force_authenticate(self.admin)
+        res = self.client.get(self.URL, {'start': '1999-01-01', 'end': '1999-12-31'})
+        row = res.data['results'][0]
+        self.assertEqual(row['orders_discounted'], 0)
+        self.assertEqual(row['records_discounted'], 0)
+        self.assertEqual(Decimal(row['discount_given']), Decimal('0'))
+        # Assignment is a present-state figure, not a dated one.
+        self.assertEqual(row['customers_assigned'], 1)

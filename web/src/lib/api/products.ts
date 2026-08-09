@@ -89,11 +89,25 @@ export const adminProductsApi = {
   },
 };
 
+export interface CategoryQuery {
+  /**
+   * Ask for active categories only. Non-staff callers always get active-only,
+   * so this is a no-op for them; staff get every category by default and need
+   * this to narrow the list (e.g. a product form that must not offer a
+   * retired category). Pass it explicitly wherever the answer must not depend
+   * on who is signed in.
+   */
+  active?: boolean;
+}
+
 export const categoriesApi = {
-  list(): Promise<Category[]> {
-    return apiFetch<Category[] | Paginated<Category>>("/categories/").then(
-      unwrapList
-    );
+  list(query: CategoryQuery = {}): Promise<Category[]> {
+    const sp = new URLSearchParams();
+    if (query.active) sp.set("active", "true");
+    const qs = sp.toString();
+    return apiFetch<Category[] | Paginated<Category>>(
+      `/categories/${qs ? `?${qs}` : ""}`
+    ).then(unwrapList);
   },
 };
 
@@ -101,6 +115,8 @@ export interface CategoryInput {
   name: string;
   /** Expo Vector Icons name (consumed by the mobile app). */
   icon?: string;
+  /** false = hidden from customers; products keep the category. */
+  is_active?: boolean;
 }
 
 export const adminCategoriesApi = {

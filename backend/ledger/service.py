@@ -39,6 +39,7 @@ def post_entry(*, customer, entry_type, amount, entry_date=None, description='',
                source_ref='', source_key=None, receipt_number=None,
                reverses=None, void_reason='', actor=None, notes='',
                item_label='', quantity=None, unit_price=None, document_number='',
+               gross_amount=None, discount_amount=None,
                bottles_out=0, bottles_in=0, update_balance=True):
     """
     Append one journal row and move the cached balance by the same amount.
@@ -84,6 +85,8 @@ def post_entry(*, customer, entry_type, amount, entry_date=None, description='',
         quantity=quantity,
         unit_price=unit_price,
         document_number=document_number,
+        gross_amount=gross_amount,
+        discount_amount=discount_amount,
         bottles_out=bottles_out or 0,
         bottles_in=bottles_in or 0,
         balance_after=balance_before + amount if update_balance else balance_before,
@@ -216,6 +219,8 @@ def sync_order(order, actor=None, force=False):
     delivered = order.status == 'Delivered'
     charge = -_dec(order.total_price) if delivered else ZERO
     bottles = order.number_of_bottles or 0
+    # Display-only breakdown; the charge itself stays the frozen NET.
+    discount = _dec(order.discount_amount) if delivered else ZERO
 
     sync_source(
         source_ref=f'order:{order.pk}:charge',
@@ -226,6 +231,8 @@ def sync_order(order, actor=None, force=False):
         item_label=_order_item_label(order),
         quantity=bottles or None,
         document_number=str(order.pk),
+        gross_amount=_dec(order.gross_amount) if discount > ZERO else None,
+        discount_amount=discount if discount > ZERO else None,
         # Bottles only leave once the order is actually delivered.
         target_bottles_out=bottles if delivered else 0,
         order=order,
@@ -265,6 +272,7 @@ def sync_delivery_record(record, actor=None, force=False):
 
     label = record.house or f'Delivery #{record.pk}'
     bottle_type = getattr(record.bottle_type, 'name', '') or 'Bottles'
+    discount = _dec(record.discount_amount)
 
     sync_source(
         source_ref=f'plant:{record.pk}:charge',
@@ -276,6 +284,8 @@ def sync_delivery_record(record, actor=None, force=False):
         quantity=record.bottles or None,
         unit_price=_dec(record.unit_price) or None,
         document_number=str(record.pk),
+        gross_amount=_dec(record.gross_amount) if discount > ZERO else None,
+        discount_amount=discount if discount > ZERO else None,
         target_bottles_out=record.bottles or 0,
         target_bottles_in=record.empties_collected or 0,
         delivery_record=record,

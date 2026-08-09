@@ -104,7 +104,7 @@ export function Navbar() {
 
               {user.is_staff && (
                 <Link
-                  href="/manage/orders"
+                  href="/manage"
                   className="flex items-center gap-1.5 rounded-xl border border-wave/40 bg-wave/10 px-3 py-2 text-sm font-medium text-wave transition hover:bg-wave/20"
                 >
                   <LayoutDashboard size={15} />
@@ -168,7 +168,7 @@ export function Navbar() {
 
                 {user.is_staff && (
                   <Link
-                    href="/manage/orders"
+                    href="/manage"
                     onClick={() => setOpen(false)}
                     className="flex items-center gap-2 rounded-xl bg-wave/10 px-3 py-2.5 text-sm font-medium text-wave"
                   >

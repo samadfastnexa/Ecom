@@ -2,7 +2,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import BasePermission
 from django.contrib.auth.models import User
+from django.utils.dateparse import parse_date
 
+from core.timeframes import scope_to_days
 from .models import ActivityLog
 from .serializers import ActivityLogSerializer
 
@@ -42,10 +44,11 @@ class ActivityLogListView(APIView):
             qs = qs.filter(target_type=p['target_type'])
         if p.get('target_id'):
             qs = qs.filter(target_id=p['target_id'])
-        if p.get('date_from'):
-            qs = qs.filter(timestamp__date__gte=p['date_from'])
-        if p.get('date_to'):
-            qs = qs.filter(timestamp__date__lte=p['date_to'])
+        qs = scope_to_days(
+            qs, 'timestamp',
+            parse_date(p['date_from']) if p.get('date_from') else None,
+            parse_date(p['date_to']) if p.get('date_to') else None,
+        )
 
         try:
             limit = min(int(p.get('limit', 100)), 500)

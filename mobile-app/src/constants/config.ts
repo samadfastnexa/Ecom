@@ -9,7 +9,7 @@ import Constants from 'expo-constants';
  *  This wins over anything in .env, so flipping it here is all
  *  you have to do (then restart Metro:  npx expo start -c).
  * ============================================================ */
-const USE_LOCAL = false;
+const USE_LOCAL = true;
 
 // Used only when USE_LOCAL is true. Point at your PC on the LAN.
 // Find your IP with:  ipconfig   (IPv4 Address, e.g. 192.168.1.5)

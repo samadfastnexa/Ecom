@@ -4,6 +4,14 @@ class Category(models.Model):
     name = models.CharField(max_length=100)
     slug = models.SlugField(unique=True, blank=True)
     icon = models.CharField(max_length=50, blank=True, help_text="Icon name from Expo Vector Icons")
+    # Retiring a category must not orphan the products already filed under it,
+    # so it is hidden rather than deleted: it disappears from the storefront and
+    # from the product form's picker, while existing products keep the label.
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Uncheck to hide from the storefront and the product form. "
+                  "Products already in this category keep it.",
+    )
 
     class Meta:
         verbose_name_plural = "Categories"

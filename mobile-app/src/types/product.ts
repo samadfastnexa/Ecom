@@ -3,6 +3,8 @@ export interface Category {
   name: string;
   slug: string;
   icon: string;
+  /** Always true for customers — they are only ever served active categories. */
+  is_active: boolean;
 }
 
 export interface Product {

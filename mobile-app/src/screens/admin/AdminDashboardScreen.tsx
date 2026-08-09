@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback, useContext } from 'react';
+import React, { useState, useEffect, useCallback, useContext, useMemo } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity,
-  RefreshControl,
+  RefreshControl, TextInput,
 } from 'react-native';
 import { LoadingScreen } from '../../components/LoadingScreen';
 import { useNavigation } from '@react-navigation/native';
@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { AuthContext } from '../../context/AuthContext';
 import { adminService, AdminSummary } from '../../services/adminService';
 import { RootStackParamList } from '../../types/navigation';
+import { RangeKey, RANGES, describeRange, parseIsoDate, rangeToDates } from '../../utils/dateRange';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -47,9 +48,49 @@ export const AdminDashboardScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  const [range, setRange] = useState<RangeKey>('today');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+
+  // No date-picker library ships with the app, so custom dates are typed. Say
+  // nothing until both boxes have text — complaining mid-keystroke is noise.
+  const customError = useMemo(() => {
+    if (range !== 'custom') return '';
+    if (!customFrom.trim() || !customTo.trim()) return '';
+    const from = parseIsoDate(customFrom);
+    const to = parseIsoDate(customTo);
+    if (!from) return 'Start date must look like YYYY-MM-DD.';
+    if (!to) return 'End date must look like YYYY-MM-DD.';
+    if (from > to) return 'Start date is after the end date.';
+    return '';
+  }, [range, customFrom, customTo]);
+
+  const customReady =
+    !!customFrom.trim() && !!customTo.trim() && !customError;
+
+  /** Blank while a custom range is half-typed, which is what suspends fetching. */
+  const { from, to } = useMemo(() => {
+    if (range !== 'custom') return rangeToDates(range);
+    return customReady
+      ? { from: customFrom.trim(), to: customTo.trim() }
+      : { from: '', to: '' };
+  }, [range, customReady, customFrom, customTo]);
+
+  const awaitingDates = range === 'custom' && !customReady;
+
   const load = useCallback(async () => {
+    // Firing without both custom dates would silently return all-time figures
+    // under a "Custom" heading, so hold the previous numbers instead.
+    if (awaitingDates) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     try {
-      const data = await adminService.getSummary();
+      const data = await adminService.getSummary({
+        date_from: from || undefined,
+        date_to: to || undefined,
+      });
       setSummary(data);
     } catch (e) {
       console.error('Dashboard load error:', e);
@@ -57,7 +98,7 @@ export const AdminDashboardScreen: React.FC = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [awaitingDates, from, to]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -68,6 +109,13 @@ export const AdminDashboardScreen: React.FC = () => {
   }
 
   const name = user?.first_name || user?.username || 'Admin';
+  const rangeLabel = RANGES.find(r => r.key === range)?.label ?? 'Period';
+  const periodDates = awaitingDates ? '' : describeRange(range, { from, to });
+  // While a custom range is incomplete the figures on screen still belong to the
+  // previous period, so the caption has to admit that rather than claim them.
+  const periodCaption = awaitingDates
+    ? `${rangeLabel} · pick both dates`
+    : `${rangeLabel}${periodDates ? ` · ${periodDates}` : ''}`;
 
   return (
     <ScrollView
@@ -86,26 +134,90 @@ export const AdminDashboardScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* Today's summary */}
+      {/* Period filter — chips match the activity log so the two read as one UI */}
+      <View style={styles.rangeRow}>
+        {RANGES.map(r => {
+          const active = range === r.key;
+          return (
+            <TouchableOpacity
+              key={r.key}
+              style={[styles.rangeChip, active && styles.rangeChipActive]}
+              onPress={() => setRange(r.key)}
+            >
+              <Text style={[styles.rangeChipText, active && styles.rangeChipTextActive]}>
+                {r.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {range === 'custom' && (
+        <View style={styles.customBlock}>
+          <View style={styles.customRow}>
+            <TextInput
+              style={[styles.customInput, !!customError && styles.customInputInvalid]}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor="#bbb"
+              value={customFrom}
+              onChangeText={setCustomFrom}
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={10}
+            />
+            <Text style={styles.customArrow}>→</Text>
+            <TextInput
+              style={[styles.customInput, !!customError && styles.customInputInvalid]}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor="#bbb"
+              value={customTo}
+              onChangeText={setCustomTo}
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={10}
+            />
+          </View>
+          {customError ? (
+            <Text style={styles.customError}>{customError}</Text>
+          ) : awaitingDates ? (
+            <Text style={styles.customHint}>Enter both dates to load this period.</Text>
+          ) : null}
+        </View>
+      )}
+
+      {/* Period summary — every figure below is scoped to the chips above */}
       <View style={styles.todayCard}>
-        <Text style={styles.todayTitle}>Today</Text>
+        <Text style={styles.todayTitle}>{periodCaption}</Text>
         <View style={styles.todayRow}>
           <View style={styles.todayStat}>
-            <Text style={styles.todayValue}>{summary?.today_orders ?? 0}</Text>
+            <Text style={styles.todayValue}>{summary?.total ?? 0}</Text>
             <Text style={styles.todayLabel}>Orders</Text>
           </View>
           <View style={styles.todayDivider} />
           <View style={styles.todayStat}>
             <Text style={styles.todayValue}>
-              PKR {(summary?.today_revenue ?? 0).toLocaleString()}
+              PKR {(summary?.revenue ?? 0).toLocaleString()}
             </Text>
             <Text style={styles.todayLabel}>Revenue</Text>
           </View>
         </View>
       </View>
 
+      {/* Today never moves with the filter, so it only earns a line of its own
+          once the selected period is something wider. */}
+      {range !== 'today' && (
+        <View style={styles.todayStrip}>
+          <Ionicons name="today-outline" size={15} color="#007AFF" />
+          <Text style={styles.todayStripText}>
+            Today: {summary?.today_orders ?? 0} orders · PKR{' '}
+            {(summary?.today_revenue ?? 0).toLocaleString()}
+          </Text>
+        </View>
+      )}
+
       {/* Order stats grid */}
       <Text style={styles.sectionTitle}>Order Status</Text>
+      <Text style={styles.sectionCaption}>Orders placed within {periodCaption}</Text>
       <View style={styles.statsGrid}>
         <StatCard
           label="Total" value={summary?.total ?? 0} icon="list" color="#007AFF" bg="#fff"
@@ -135,6 +247,7 @@ export const AdminDashboardScreen: React.FC = () => {
 
       {/* Payment stats */}
       <Text style={styles.sectionTitle}>Payments</Text>
+      <Text style={styles.sectionCaption}>Orders placed within {periodCaption}</Text>
       <View style={styles.statsGrid}>
         <StatCard
           label="Paid" value={summary?.paid_count ?? 0} icon="card" color="#34C759" bg="#fff"
@@ -201,11 +314,51 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   headerBadgeText: { fontSize: 13, fontWeight: '600', color: '#007AFF' },
+  // Kept byte-identical to AdminActivityScreen's chips so both screens match.
+  rangeRow: {
+    flexDirection: 'row', gap: 8,
+    paddingHorizontal: 12, paddingTop: 10, paddingBottom: 2,
+    backgroundColor: 'white',
+  },
+  rangeChip: {
+    flex: 1, paddingVertical: 7, borderRadius: 10,
+    borderWidth: 1, borderColor: '#e4e6ea', backgroundColor: 'white',
+    alignItems: 'center',
+  },
+  rangeChipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  rangeChipText: { fontSize: 12, fontWeight: '600', color: '#666' },
+  rangeChipTextActive: { color: 'white' },
+  customBlock: {
+    backgroundColor: 'white',
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 4,
+  },
+  customRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  customInput: {
+    flex: 1, height: 38, borderRadius: 10,
+    borderWidth: 1, borderColor: '#e4e6ea', backgroundColor: '#fafafa',
+    paddingHorizontal: 10, fontSize: 13, color: '#1a1a1a',
+  },
+  customInputInvalid: { borderColor: '#D93025', backgroundColor: '#FFF7F7' },
+  customArrow: { fontSize: 14, color: '#aaa' },
+  customError: { fontSize: 12, color: '#D93025', marginTop: 6 },
+  customHint: { fontSize: 12, color: '#999', marginTop: 6 },
+  todayStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginHorizontal: 16,
+    marginTop: -10,
+    marginBottom: 18,
+  },
+  todayStripText: { fontSize: 12, color: '#666' },
   todayCard: {
     backgroundColor: '#007AFF',
     marginHorizontal: 16,
     borderRadius: 16,
     padding: 20,
+    marginTop: 14,
     marginBottom: 20,
   },
   todayTitle: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginBottom: 12 },
@@ -219,6 +372,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
     marginHorizontal: 16,
+    marginBottom: 10,
+  },
+  sectionCaption: {
+    fontSize: 11,
+    color: '#999',
+    marginHorizontal: 16,
+    marginTop: -6,
     marginBottom: 10,
   },
   statsGrid: {

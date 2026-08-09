@@ -3,7 +3,7 @@ from django.contrib.auth.models import User, Group, Permission
 from django.contrib.auth.admin import UserAdmin, GroupAdmin as BaseGroupAdmin
 from django.utils.html import format_html
 from .models import (
-    Area, UserProfile, NotificationHistory,
+    Area, DiscountCategory, UserProfile, NotificationHistory,
     RiderLocation, RiderLocationPing, TrackingSettings,
 )
 
@@ -169,6 +169,14 @@ class AreaAdmin(admin.ModelAdmin):
     ordering = ('order', 'name')
 
 
+@admin.register(DiscountCategory)
+class DiscountCategoryAdmin(admin.ModelAdmin):
+    list_display = ('name', 'discount_type', 'discount_value', 'is_active', 'created_at')
+    list_editable = ('is_active',)
+    list_filter = ('discount_type', 'is_active')
+    search_fields = ('name',)
+
+
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
     list_display = ('user', 'user_type', 'phone_number', 'custom_bottle_price', 'is_available', 'vehicle_type')
@@ -183,6 +191,11 @@ class UserProfileAdmin(admin.ModelAdmin):
         ('Plant Pricing', {
             'fields': ('custom_bottle_price',),
             'description': 'Optional per-bottle price for this customer. Leave blank to use the standard price.',
+        }),
+        ('Billing Discount', {
+            'fields': ('discount_category',),
+            'description': 'Discount tier applied automatically at billing. '
+                           'Only future orders and deliveries are affected.',
         }),
         ('Delivery Boy Details', {
             'fields': ('phone_number', 'address', 'is_available', 'current_location',

@@ -1,6 +1,10 @@
+from decimal import Decimal
+
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+
+from accounts.models import DiscountCategory, line_discount_amount
 
 
 class CustomerType(models.Model):
@@ -84,7 +88,35 @@ class DeliveryRecord(models.Model):
         decimal_places=2,
         default=0,
         editable=False,
-        help_text="Auto-calculated: bottles × unit price",
+        help_text="Auto-calculated NET: bottles × unit price − discount",
+    )
+
+    # ── Discount snapshot (frozen when the record is created/billed) ─────────
+    # `amount` stays the NET, so the ledger sync and every list keep working
+    # unchanged. Later edits to bottles/unit_price recompute the discount from
+    # the FROZEN type/value below — never from the live category — so editing
+    # a DiscountCategory can never change an existing record.
+    gross_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0, editable=False,
+        help_text="Auto-calculated: bottles × unit price before discount",
+    )
+    discount_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0, editable=False,
+    )
+    discount_category = models.ForeignKey(
+        'accounts.DiscountCategory', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='delivery_records',
+        help_text="Reporting link only — the snapshot fields are what billing froze.",
+    )
+    discount_category_name = models.CharField(max_length=100, blank=True)
+    discount_type = models.CharField(max_length=10, blank=True)
+    discount_value = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+    )
+    discount_overridden = models.BooleanField(
+        default=False,
+        help_text="True when staff with can_override_discount pinned an "
+                  "explicit amount; save() then stops recomputing it.",
     )
 
     empties_collected = models.PositiveIntegerField(
@@ -116,8 +148,35 @@ class DeliveryRecord(models.Model):
         verbose_name_plural = 'Delivery Records'
 
     def save(self, *args, **kwargs):
-        # Total is always derived from bottles × unit price.
-        self.amount = (self.bottles or 0) * (self.unit_price or 0)
+        self.gross_amount = (self.bottles or 0) * (self.unit_price or 0)
+
+        # Billing time: a brand-new record freezes the customer's category
+        # onto itself. From then on only the frozen values matter.
+        if self.pk is None and not self.discount_overridden and not self.discount_type:
+            category = DiscountCategory.for_customer(self.customer)
+            if category:
+                self.discount_category = category
+                self.discount_category_name = category.name
+                self.discount_type = category.discount_type
+                self.discount_value = category.discount_value
+
+        if self.discount_overridden:
+            # An explicit override is respected verbatim, capped at the gross.
+            self.discount_amount = min(
+                self.discount_amount or Decimal('0'), self.gross_amount,
+            )
+        elif self.discount_type:
+            # Recompute from the FROZEN snapshot so bottle-count edits stay
+            # consistent while category edits change nothing here.
+            self.discount_amount = line_discount_amount(
+                self.discount_type, self.discount_value,
+                self.bottles, self.unit_price,
+            )
+        else:
+            self.discount_amount = Decimal('0')
+
+        # Total is the NET: gross minus the discount line.
+        self.amount = self.gross_amount - self.discount_amount
         if self.paid_amount is None:
             self.paid_amount = 0
         # Keep the boolean in sync: fully paid when received covers the total.

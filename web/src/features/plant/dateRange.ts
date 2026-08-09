@@ -6,7 +6,12 @@ export function isoDate(d = new Date()): string {
   return new Date(d.getTime() - tz).toISOString().slice(0, 10);
 }
 
-export type PresetKey = "today" | "week" | "month" | "custom";
+/**
+ * `week` is a rolling 7-day window (what the plant ledger reports on) while
+ * `this_week` is the calendar week so far. Both live here so no screen has to
+ * re-derive local-date maths — `toISOString()` shifts the day east of UTC.
+ */
+export type PresetKey = "today" | "week" | "this_week" | "month" | "custom";
 
 export function presetRange(key: PresetKey): PlantDateRange {
   const today = new Date();
@@ -16,6 +21,12 @@ export function presetRange(key: PresetKey): PlantDateRange {
     case "week": {
       const start = new Date(today);
       start.setDate(today.getDate() - 6);
+      return { start: isoDate(start), end: isoDate(today) };
+    }
+    case "this_week": {
+      // Weeks start Monday here; getDay() puts Sunday at 0, so rotate it to 6.
+      const start = new Date(today);
+      start.setDate(today.getDate() - ((today.getDay() + 6) % 7));
       return { start: isoDate(start), end: isoDate(today) };
     }
     case "month": {

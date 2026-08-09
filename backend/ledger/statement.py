@@ -101,6 +101,10 @@ def build_statement(customer, *, start=None, end=None, entry_type=None, source=N
         'quantity': sum((r.quantity or ZERO) for r in rows) or ZERO,
         'bottles_out': sum(r.bottles_out for r in rows),
         'bottles_in': sum(r.bottles_in for r in rows),
+        # Display columns: only discounted charges carry these, so the sums
+        # describe exactly the rows whose Gross / Discount cells are filled.
+        'gross': sum((r.gross_amount or ZERO) for r in rows),
+        'discount': sum((r.discount_amount or ZERO) for r in rows),
     }
 
     return {
@@ -116,6 +120,8 @@ def build_statement(customer, *, start=None, end=None, entry_type=None, source=N
             'quantity': period_totals['quantity'],
             'bottles_out': period_totals['bottles_out'],
             'bottles_in': period_totals['bottles_in'],
+            'gross': period_totals['gross'],
+            'discount': period_totals['discount'],
         },
         'rows': rows,
         'count': len(rows),

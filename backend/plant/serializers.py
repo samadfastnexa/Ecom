@@ -1,5 +1,9 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 from django.contrib.auth.models import User
+
+from accounts.models import DiscountCategory, line_discount_amount
 from .models import (
     DeliveryRecord, CustomerType, BottleType, PlantSettings, resolve_price,
 )
@@ -50,6 +54,19 @@ class DeliveryRecordSerializer(serializers.ModelSerializer):
         max_digits=12, decimal_places=2, read_only=True
     )
     payment_status = serializers.CharField(read_only=True)
+    # The frozen billing snapshot — derived server-side, never client input.
+    gross_amount = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    discount_amount = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+    # Honoured only for staff with can_override_discount; the viewset 403s
+    # everyone else before validation runs.
+    discount_override = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal('0'),
+        required=False, allow_null=True, write_only=True,
+    )
 
     class Meta:
         model = DeliveryRecord
@@ -58,10 +75,16 @@ class DeliveryRecordSerializer(serializers.ModelSerializer):
             'customer_type_id', 'customer_type_name',
             'bottle_type_id', 'bottle_type_name', 'house',
             'bottles', 'unit_price', 'amount', 'empties_collected',
+            'gross_amount', 'discount_amount', 'discount_category',
+            'discount_category_name', 'discount_type', 'discount_value',
+            'discount_overridden', 'discount_override',
             'paid', 'paid_amount', 'pending', 'payment_status',
             'notes', 'created_at',
         ]
-        read_only_fields = ['paid']
+        read_only_fields = [
+            'paid', 'discount_category', 'discount_category_name',
+            'discount_type', 'discount_value', 'discount_overridden',
+        ]
 
     def get_customer_name(self, obj):
         if obj.customer:
@@ -100,7 +123,49 @@ class DeliveryRecordSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data['created_by'] = self.context['request'].user
-        return super().create(validated_data)
+        override = validated_data.pop('discount_override', None)
+        if override is None:
+            # DeliveryRecord.save() freezes the customer's category snapshot
+            # and derives gross / discount / net itself.
+            return super().create(validated_data)
+
+        record = DeliveryRecord(**validated_data)
+        # Freeze the category for display even though the amount is pinned —
+        # the receipt still reads "Discount (Wholesale)".
+        category = DiscountCategory.for_customer(record.customer)
+        auto = (
+            category.line_discount(record.bottles, record.unit_price)
+            if category else Decimal('0.00')
+        )
+        if category:
+            record.discount_category = category
+            record.discount_category_name = category.name
+            record.discount_type = category.discount_type
+            record.discount_value = category.discount_value
+        record.discount_overridden = True
+        record.discount_amount = override
+        record.save()
+        record._auto_discount_amount = auto  # for the viewset's audit log
+        return record
+
+    def update(self, instance, validated_data):
+        override = validated_data.pop('discount_override', None)
+        record = super().update(instance, validated_data)
+        if override is not None:
+            # What billing would have charged under the frozen snapshot, for
+            # the audit trail.
+            auto = (
+                line_discount_amount(
+                    record.discount_type, record.discount_value,
+                    record.bottles, record.unit_price,
+                )
+                if record.discount_type else Decimal('0.00')
+            )
+            record.discount_overridden = True
+            record.discount_amount = override
+            record.save()
+            record._auto_discount_amount = auto
+        return record
 
 
 class PlantCustomerSerializer(serializers.ModelSerializer):

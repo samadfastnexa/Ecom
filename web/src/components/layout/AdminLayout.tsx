@@ -16,12 +16,14 @@ import {
   Factory,
   Bell,
   BookOpen,
+  LayoutDashboard,
   Loader2,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/cn";
 
 const NAV_ITEMS = [
+  { href: "/manage", label: "Dashboard", icon: LayoutDashboard },
   { href: "/manage/orders", label: "Orders", icon: ClipboardList },
   { href: "/manage/shop", label: "Shop", icon: ShoppingBag },
   { href: "/manage/customers", label: "Customers", icon: Users },
@@ -81,7 +83,10 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
         {/* Nav */}
         <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
           {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-            const active = pathname.startsWith(href);
+            // Dashboard sits at the section root, so a prefix match would light
+            // it up on every sub-page.
+            const active =
+              href === "/manage" ? pathname === "/manage" : pathname.startsWith(href);
             const isLoading = loadingHref === href;
             return (
               <button

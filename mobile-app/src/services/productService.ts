@@ -35,9 +35,13 @@ export const ProductService = {
     }
   },
 
+  // `?active=true` is sent explicitly rather than leaning on the server default:
+  // the default already hides inactive categories from customers, but a staff
+  // member browsing the shop while signed in would otherwise be handed the
+  // hidden ones too. Being explicit makes this deterministic for every caller.
   getCategories: async (): Promise<Category[]> => {
     try {
-      const response = await fetch(`${API_URL}/categories/`);
+      const response = await fetch(`${API_URL}/categories/?active=true`);
       if (!response.ok) {
         throw new Error('Failed to fetch categories');
       }

@@ -22,10 +22,15 @@ export interface RiderMapMarker {
 export interface RiderMapViewProps {
   markers: RiderMapMarker[];
   /** Chronological path for the selected rider; empty draws no line. */
-  trail: LatLng[];
-  selectedId: number | null;
-  onSelectRider: (riderId: number) => void;
-  onDeselect: () => void;
+  trail?: LatLng[];
+  selectedId?: number | null;
+  onSelectRider?: (riderId: number) => void;
+  onDeselect?: () => void;
+  /**
+   * False turns the map into a still preview. Order screens are ScrollViews, and
+   * a pannable map inside one steals every vertical drag from the page.
+   */
+  interactive?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -52,10 +57,11 @@ const regionFor = (points: LatLng[]): Region => {
 
 const RiderMapViewInner: React.FC<RiderMapViewProps> = ({
   markers,
-  trail,
-  selectedId,
+  trail = [],
+  selectedId = null,
   onSelectRider,
   onDeselect,
+  interactive = true,
   style,
 }) => {
   const mapRef = useRef<MapView | null>(null);
@@ -90,6 +96,10 @@ const RiderMapViewInner: React.FC<RiderMapViewProps> = ({
       style={style}
       initialRegion={regionFor(markers)}
       onPress={onDeselect}
+      scrollEnabled={interactive}
+      zoomEnabled={interactive}
+      rotateEnabled={interactive}
+      pitchEnabled={interactive}
       toolbarEnabled={false}
       showsMyLocationButton={false}
     >
@@ -105,7 +115,7 @@ const RiderMapViewInner: React.FC<RiderMapViewProps> = ({
           title={marker.title}
           description={marker.description}
           pinColor={marker.color}
-          onPress={() => onSelectRider(marker.id)}
+          onPress={() => onSelectRider?.(marker.id)}
         />
       ))}
     </MapView>

@@ -7,11 +7,11 @@ import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { ordersApi } from "@/lib/api";
 import { formatPrice } from "@/lib/format";
-import type { PaymentMethod } from "@/lib/types";
 import { Button, Card, useToast } from "@/components/ui";
 import { CartSummary } from "@/features/cart/components/CartSummary";
-import { AddressForm } from "./AddressForm";
+import { useCheckoutAddress } from "../hooks/useCheckoutAddress";
 import { PaymentSelector } from "./PaymentSelector";
+import { ShippingAddressSection } from "./ShippingAddressSection";
 
 export function CheckoutView() {
   const { items, total, clear } = useCart();
@@ -19,7 +19,9 @@ export function CheckoutView() {
   const router = useRouter();
   const notify = useToast();
 
-  const [address, setAddress] = useState(user?.address || "");
+  // The profile address only seeds the typed fallback — it is one free-text
+  // line with no pin, so it can never stand in for a saved address book entry.
+  const shipping = useCheckoutAddress(user?.address ?? "");
   const [placing, setPlacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,20 +38,20 @@ export function CheckoutView() {
 
   const placeOrder = async () => {
     setError(null);
-    if (!address.trim()) {
-      setError("Please enter a shipping address.");
-      return;
-    }
     setPlacing(true);
     try {
+      // Resolves to address_id or a typed address, saving a moved pin on the
+      // way — see useCheckoutAddress.resolve for why the pin cannot simply
+      // ride along with the order.
+      const destination = await shipping.resolve();
       const order = await ordersApi.create({
+        ...destination,
         items: items.map((i) => ({
           product_id: i.product.id,
           quantity: i.quantity,
           price: i.product.price,
         })),
         total_price: total.toFixed(2),
-        shipping_address: address,
         payment_method: "COD",
         payment_number: null,
       });
@@ -69,7 +71,7 @@ export function CheckoutView() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="flex flex-col gap-6 lg:col-span-2">
-          <AddressForm value={address} onChange={setAddress} />
+          <ShippingAddressSection state={shipping} />
           <PaymentSelector />
         </div>
 
@@ -97,6 +99,15 @@ export function CheckoutView() {
             {error && (
               <p className="rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
                 {error}
+              </p>
+            )}
+
+            {/* Warned before the click, not after: ordering will also write the
+                moved pin back to the address book. */}
+            {shipping.pinDirty && (
+              <p className="text-xs text-amber-200/80">
+                Placing this order also saves the moved pin to “
+                {shipping.selected?.display_label}”.
               </p>
             )}
 

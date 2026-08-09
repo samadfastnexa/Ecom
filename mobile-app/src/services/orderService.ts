@@ -21,6 +21,14 @@ export interface Order {
   total_price: number;
   status: string;
   shipping_address: string;
+  /**
+   * Map pin snapshotted at checkout — 6dp decimal strings, null when the
+   * customer never dropped one. Optional so older cached shapes still parse.
+   */
+  shipping_latitude?: string | null;
+  shipping_longitude?: string | null;
+  /** Saved-address name the order was placed from; '' when unnamed. */
+  shipping_label?: string;
   payment_method: string;
   created_at: string;
   // Delivery fields
@@ -48,8 +56,21 @@ export interface CreateOrderPayload {
     price: number;
   }[];
   total_price: number;
-  shipping_address: string;
+  /**
+   * The chosen address book entry. The server copies its text, parts, pin and
+   * label onto the order, so a later edit or delete of the entry cannot change
+   * where a past order went.
+   *
+   * Note there is no shipping_latitude/longitude here on purpose: the order
+   * serializer's create() overwrites both from the saved address whenever
+   * address_id is present, so a pin sent alongside it would be discarded.
+   * Checkout PATCHes the address instead — see CheckoutScreen.
+   */
+  address_id?: number;
+  /** Only needed when no address_id is sent; the API 400s if both are absent. */
+  shipping_address?: string;
   payment_method: string;
+  payment_number?: string | null;
 }
 
 export const createOrder = async (orderData: CreateOrderPayload) => {

@@ -11,6 +11,7 @@ import {
   useMarkerRef,
 } from "@vis.gl/react-google-maps";
 import { GOOGLE_MAPS_API_KEY } from "@/lib/constants";
+import { DARK_MAP_STYLE } from "@/components/maps/darkMapStyle";
 import type { RiderLocation, RiderTrailPoint } from "@/lib/types";
 import { FRESHNESS, formatAgo, freshnessOf, type Freshness } from "../freshness";
 
@@ -21,27 +22,6 @@ const FALLBACK_ZOOM = 11;
 const SINGLE_RIDER_ZOOM = 15;
 const FOCUS_ZOOM = 16;
 const BOUNDS_PADDING_PX = 64;
-
-/**
- * `styles` is only honoured when the map has NO mapId — cloud-based styling
- * takes over the moment one is set. Keeping mapId unset is deliberate: it means
- * the map works with nothing but an API key, no Cloud console map style or
- * Map ID to create first.
- */
-const DARK_MAP_STYLE: google.maps.MapTypeStyle[] = [
-  { elementType: "geometry", stylers: [{ color: "#0a1a2b" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#7fa8bd" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#061019" }] },
-  { featureType: "administrative", elementType: "geometry", stylers: [{ color: "#0d2b40" }] },
-  { featureType: "administrative.land_parcel", stylers: [{ visibility: "off" }] },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#123449" }] },
-  { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#6d94a8" }] },
-  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#1a4a63" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#04121e" }] },
-  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#3d6d85" }] },
-];
 
 /**
  * SVG path strings rather than the `google.maps.SymbolPath` enum, so an icon

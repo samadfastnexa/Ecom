@@ -1,14 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { UserPlus } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { Button, Input, useToast } from "@/components/ui";
-import { cn } from "@/lib/cn";
-import { areasApi } from "@/lib/api/areas";
-import type { Area } from "@/lib/types";
+import {
+  AddressFields,
+  Button,
+  Input,
+  useToast,
+  validateAddress,
+  EMPTY_ADDRESS,
+  type AddressErrors,
+  type AddressParts,
+} from "@/components/ui";
 import { AuthShell } from "./AuthShell";
 import { GoogleDivider, GoogleSignInButton } from "./GoogleSignInButton";
 
@@ -20,10 +26,6 @@ const EMPTY = {
   password: "",
   password_confirm: "",
   phone_number: "",
-  house_number: "",
-  portion: "",
-  block: "",
-  area: "",
 };
 
 // Pakistani mobile numbers: 03xx-xxxxxxx, +923xxxxxxxxx or 923xxxxxxxxx
@@ -36,16 +38,10 @@ export function RegisterForm() {
   const notify = useToast();
 
   const [form, setForm] = useState(EMPTY);
+  const [address, setAddress] = useState<AddressParts>(EMPTY_ADDRESS);
+  const [addressErrors, setAddressErrors] = useState<AddressErrors>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [areas, setAreas] = useState<Area[]>([]);
-  const [customArea, setCustomArea] = useState(false);
-
-  // Admin-defined localities. Public endpoint — signup precedes any login.
-  // A failure is non-fatal: the field falls back to free text.
-  useEffect(() => {
-    areasApi.list().then(setAreas).catch(() => setCustomArea(true));
-  }, []);
 
   const set =
     (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -65,11 +61,25 @@ export function RegisterForm() {
       return;
     }
 
+    // The address parts live outside the native form controls now, so the
+    // browser's own `required` no longer covers them.
+    const issues = validateAddress(address);
+    setAddressErrors(issues);
+    if (Object.keys(issues).length > 0) {
+      setError("Complete your delivery address.");
+      return;
+    }
+
     setLoading(true);
     try {
       await register({
         ...form,
         phone_number: stripPhoneSeparators(form.phone_number),
+        house_number: address.house_number.trim(),
+        // A canonical key, never the label the picker shows.
+        portion: address.portion || undefined,
+        block: address.block.trim() || undefined,
+        area: address.area.trim(),
       });
       notify("Account created — welcome aboard!");
       router.push("/");
@@ -165,79 +175,13 @@ export function RegisterForm() {
           required
         />
 
-        {/* House / Portion / Block on one row — short values that belong
-            together, and it keeps the form from running long. */}
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Input
-            label="House number"
-            value={form.house_number}
-            onChange={set("house_number")}
-            placeholder="H-12"
-            maxLength={50}
-            required
-          />
-          <Input
-            label="Portion"
-            value={form.portion}
-            onChange={set("portion")}
-            placeholder="Ground"
-            maxLength={50}
-          />
-          <Input
-            label="Block"
-            value={form.block}
-            onChange={set("block")}
-            placeholder="Block 6"
-            maxLength={100}
-          />
-        </div>
-
-        <div>
-          <label className="label">
-            Area <span className="text-rose-400">*</span>
-          </label>
-          {areas.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2">
-              {areas.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => { setForm((f) => ({ ...f, area: a.name })); setCustomArea(false); }}
-                  className={cn(
-                    "rounded-full border px-3.5 py-1.5 text-sm transition",
-                    form.area === a.name && !customArea
-                      ? "border-wave bg-wave/20 text-wave"
-                      : "border-white/10 text-mist/60 hover:text-mist"
-                  )}
-                >
-                  {a.name}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => { setCustomArea(true); setForm((f) => ({ ...f, area: "" })); }}
-                className={cn(
-                  "rounded-full border px-3.5 py-1.5 text-sm transition",
-                  customArea
-                    ? "border-wave bg-wave/20 text-wave"
-                    : "border-white/10 text-mist/60 hover:text-mist"
-                )}
-              >
-                Other…
-              </button>
-            </div>
-          )}
-          {(customArea || areas.length === 0) && (
-            <input
-              className="input w-full"
-              value={form.area}
-              onChange={set("area")}
-              placeholder="Type your area"
-              maxLength={150}
-              required
-            />
-          )}
-        </div>
+        {/* The shared component staff forms use, so an address is captured the
+            same way whoever types it. */}
+        <AddressFields
+          value={address}
+          onChange={setAddress}
+          errors={addressErrors}
+        />
         <p className="text-xs text-mist/50">
           We use this as your default delivery address.
         </p>

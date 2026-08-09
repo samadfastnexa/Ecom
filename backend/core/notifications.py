@@ -18,7 +18,9 @@ def send_push_notification(token, title, body, data=None):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        # timeout is load-bearing: this runs inside order-save paths, so a slow
+        # Expo endpoint must never be able to hang an order save indefinitely.
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
