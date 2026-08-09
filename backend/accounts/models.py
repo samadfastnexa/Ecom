@@ -1,11 +1,26 @@
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import User
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
+
+from core.address import PORTION_CHOICES, PORTION_LABELS
+
+# Coordinates are Decimal, never float: MySQL float rounding is visible on a map
+# as a pin that jumps a few metres every time the row is read back. Six decimal
+# places is ~11 cm, finer than any consumer GPS. Shared by the rider-tracking
+# models, the customer delivery pin on UserProfile, and the address book.
+LATITUDE_VALIDATORS = [MinValueValidator(Decimal('-90')), MaxValueValidator(Decimal('90'))]
+LONGITUDE_VALIDATORS = [MinValueValidator(Decimal('-180')), MaxValueValidator(Decimal('180'))]
+
+#: Every column set_customer_pin touches — callers pass this to update_fields.
+CUSTOMER_PIN_FIELDS = [
+    'customer_latitude', 'customer_longitude',
+    'location_source', 'location_set_by', 'location_set_at',
+]
 
 # ── Mobile profile field config ──────────────────────────────────────────────
 
@@ -68,6 +83,140 @@ class MobileProfileConfig(models.Model):
         return f'MobileProfileConfig({self.user_type})'
 
 
+class CustomerAddress(models.Model):
+    """One entry in a customer's address book — Home, Office, Shop, Warehouse.
+
+    Customers used to have exactly one address, stored directly on UserProfile.
+    That single copy is still maintained here as a mirror of whichever address
+    is the default, because a lot of the system reads it: ledger PDFs, the
+    admin customer list, the rider's customer card. Keeping it in sync means
+    the address book is additive rather than a migration of every reader.
+
+    `latitude`/`longitude` are the delivery pin. House numbers in the operating
+    areas are unreliable, so the exact stopping point is worth more to a rider
+    than the text — but it stays optional, since an address typed at 2am with
+    no GPS is still better than no address.
+    """
+
+    LABEL_HOME = 'home'
+    LABEL_CHOICES = [
+        (LABEL_HOME, 'Home'),
+        ('office', 'Office'),
+        ('shop', 'Shop'),
+        ('warehouse', 'Warehouse'),
+        ('other', 'Other'),
+    ]
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='addresses',
+    )
+    label = models.CharField(max_length=20, choices=LABEL_CHOICES, default=LABEL_HOME)
+    custom_label = models.CharField(
+        max_length=50, blank=True, default='',
+        help_text="Used instead of the label when label is 'other'.",
+    )
+
+    house_number = models.CharField(max_length=50, blank=True, default='')
+    portion = models.CharField(
+        max_length=50, blank=True, default='', choices=PORTION_CHOICES,
+    )
+    block = models.CharField(max_length=100, blank=True, default='')
+    area = models.CharField(max_length=150, blank=True, default='')
+    address = models.TextField(
+        blank=True, default='',
+        help_text="Composed from the parts on save; what riders and PDFs read.",
+    )
+
+    latitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True,
+        validators=LATITUDE_VALIDATORS,
+    )
+    longitude = models.DecimalField(
+        max_digits=10, decimal_places=6, null=True, blank=True,
+        validators=LONGITUDE_VALIDATORS,
+    )
+
+    is_default = models.BooleanField(
+        default=False,
+        help_text="The address checkout pre-selects. Exactly one per customer.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = 'Customer addresses'
+        # Default first, then newest — the order the checkout picker shows.
+        ordering = ['-is_default', '-updated_at']
+        indexes = [models.Index(fields=['user', 'is_default'])]
+
+    def __str__(self):
+        return f'{self.user.username} — {self.display_label}'
+
+    @property
+    def display_label(self):
+        if self.label == 'other' and self.custom_label.strip():
+            return self.custom_label.strip()
+        return self.get_label_display()
+
+    @property
+    def has_pin(self):
+        return self.latitude is not None and self.longitude is not None
+
+    def compose_address(self):
+        """Join the parts into one line, portion written as its label."""
+        portion = PORTION_LABELS.get(self.portion, self.portion)
+        parts = [self.house_number, portion, self.block, self.area]
+        return ', '.join(p.strip() for p in parts if p and p.strip())
+
+    def save(self, *args, **kwargs):
+        self.address = self.compose_address() or self.address
+        with transaction.atomic():
+            # A customer's very first address is their default whether they
+            # asked for it or not — otherwise checkout has nothing to pre-select.
+            if not self.is_default and not (
+                CustomerAddress.objects.filter(user=self.user, is_default=True)
+                .exclude(pk=self.pk).exists()
+            ):
+                self.is_default = True
+            super().save(*args, **kwargs)
+            if self.is_default:
+                # Enforced here rather than with a conditional unique index,
+                # which MySQL does not support.
+                CustomerAddress.objects.filter(user=self.user, is_default=True) \
+                    .exclude(pk=self.pk).update(is_default=False)
+                self.sync_to_profile()
+
+    def delete(self, *args, **kwargs):
+        was_default, user = self.is_default, self.user
+        with transaction.atomic():
+            super().delete(*args, **kwargs)
+            if was_default:
+                # Never leave a customer with addresses but no default.
+                replacement = CustomerAddress.objects.filter(user=user).first()
+                if replacement:
+                    replacement.is_default = True
+                    replacement.save()
+
+    def sync_to_profile(self):
+        """Mirror this address onto UserProfile, which the rest of the app reads."""
+        profile = getattr(self.user, 'profile', None)
+        if profile is None:
+            return
+        profile.house_number = self.house_number
+        profile.portion = self.portion
+        profile.block = self.block
+        profile.area = self.area
+        profile.address = self.address
+        fields = ['house_number', 'portion', 'block', 'area', 'address']
+        if self.has_pin:
+            profile.set_customer_pin(
+                self.latitude, self.longitude,
+                source='customer', set_by=self.user,
+            )
+            fields += CUSTOMER_PIN_FIELDS
+        profile.save(update_fields=fields)
+
+
 class Area(models.Model):
     """
     Admin-managed list of delivery localities (Johar Town, Wapda Town, …).
@@ -93,6 +242,108 @@ class Area(models.Model):
 
     def __str__(self):
         return self.name
+
+
+# ── Customer discount categories ─────────────────────────────────────────────
+
+TWO_PLACES = Decimal('0.01')
+
+
+def line_discount_amount(discount_type, discount_value, quantity, unit_price):
+    """
+    Pure discount arithmetic for ONE billing line.
+
+    Fixed discounts are per unit (Rs 30 off a Rs 180 bottle bills at 150 each);
+    percentage discounts are a share of the line gross. Rounded HALF_UP to 2 dp
+    per line, and capped at the line gross so a discount can never push a line
+    below zero.
+
+    Module-level rather than a method so orders and plant records can recompute
+    from their FROZEN snapshot values — editing a DiscountCategory later must
+    never change an already-billed line.
+    """
+    quantity = Decimal(quantity or 0)
+    unit_price = Decimal(unit_price or 0)
+    value = Decimal(discount_value or 0)
+    gross = quantity * unit_price
+    if gross <= 0 or value <= 0:
+        return Decimal('0.00')
+    if discount_type == DiscountCategory.PERCENTAGE:
+        raw = gross * value / Decimal('100')
+    else:
+        raw = value * quantity
+    amount = raw.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
+    return min(amount, gross.quantize(TWO_PLACES))
+
+
+class DiscountCategory(models.Model):
+    """
+    Admin-managed discount tier a customer can be assigned to
+    (Wholesale, Masjid, Shop, …).
+
+    Selling prices never change; the discount is a separate, visible line
+    applied automatically at billing time. Billing freezes a snapshot of these
+    values onto the order / delivery record, so editing a category here only
+    affects future bills. Deactivating is the soft way to retire a category —
+    deleting one that customers still use is refused (PROTECT).
+    """
+
+    FIXED = 'fixed'
+    PERCENTAGE = 'percentage'
+    DISCOUNT_TYPE_CHOICES = [
+        (FIXED, 'Fixed amount per unit'),
+        (PERCENTAGE, 'Percentage of the line'),
+    ]
+
+    name = models.CharField(max_length=100, unique=True)
+    discount_type = models.CharField(
+        max_length=10, choices=DISCOUNT_TYPE_CHOICES, default=FIXED,
+    )
+    discount_value = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        help_text="Rupees off per unit for 'fixed'; percent of the line gross "
+                  "for 'percentage' (at most 100).",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Uncheck to stop discounting future bills; history keeps its "
+                  "frozen snapshots either way.",
+    )
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'Discount Category'
+        verbose_name_plural = 'Discount Categories'
+        permissions = [
+            # Granted per staff user via user_permissions / groups, exactly like
+            # the plant and ledger permissions. Deliberately NOT implied by
+            # is_staff: only specifically trusted staff may move money off the
+            # automatic price.
+            ('can_override_discount', 'Can override the auto-applied discount at billing'),
+        ]
+
+    def __str__(self):
+        if self.discount_type == self.PERCENTAGE:
+            return f'{self.name} ({self.discount_value}%)'
+        return f'{self.name} (Rs {self.discount_value}/unit)'
+
+    @classmethod
+    def for_customer(cls, user):
+        """The customer's category when it should bill, else None."""
+        profile = getattr(user, 'profile', None) if user else None
+        category = profile.discount_category if profile else None
+        if category and category.is_active:
+            return category
+        return None
+
+    def line_discount(self, quantity, unit_price):
+        """Discount this category grants on one billing line."""
+        return line_discount_amount(
+            self.discount_type, self.discount_value, quantity, unit_price,
+        )
 
 
 class UserProfile(models.Model):
@@ -126,8 +377,10 @@ class UserProfile(models.Model):
     # ── Structured address parts (composed into `address`) ───────────────────
     house_number = models.CharField(max_length=50, blank=True, null=True)
     portion = models.CharField(
-        max_length=50, blank=True, null=True,
-        help_text="Ground floor / 1st floor / etc. — optional",
+        max_length=50, blank=True, null=True, choices=PORTION_CHOICES,
+        help_text="Which part of the house — optional. A fixed list, so the "
+                  "field can be grouped and reported on instead of arriving as "
+                  "'Ground', 'ground floor', 'GF' and 'g'.",
     )
     block = models.CharField(
         max_length=100, blank=True, null=True,
@@ -139,6 +392,39 @@ class UserProfile(models.Model):
                   "but a customer may enter their own.",
     )
     current_location = models.CharField(max_length=255, blank=True, null=True)
+    # What an admin's work place is called when its location is shared out of
+    # the app. Free text rather than reusing LedgerSettings.business_name: that
+    # name is what gets printed on every receipt, whereas this identifies *which*
+    # place the pin is — "Century Sip — Plant 2", "Main Office", "Warehouse".
+    work_place_label = models.CharField(
+        max_length=120, blank=True, default='',
+        help_text="Name used when this work place's location is shared outside "
+                  "the app. Falls back to the business name when empty.",
+    )
+    # ── Customer delivery pin ────────────────────────────────────────────────
+    # Where the rider should actually stop — house numbers in the operating
+    # areas are unreliable, so the address text is complemented by an exact
+    # map pin. The serializers range-check in Python (MariaDB may ignore CHECK
+    # constraints); source/set_by/set_at record whose claim the pin is.
+    LOCATION_SOURCE_CHOICES = [
+        ('customer', 'Customer'),
+        ('rider', 'Rider / staff'),  # business-side correction, not the customer's own claim
+    ]
+    customer_latitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True,
+        validators=LATITUDE_VALIDATORS,
+    )
+    customer_longitude = models.DecimalField(
+        max_digits=10, decimal_places=6, null=True, blank=True,
+        validators=LONGITUDE_VALIDATORS,
+    )
+    location_source = models.CharField(
+        max_length=10, choices=LOCATION_SOURCE_CHOICES, null=True, blank=True,
+    )
+    location_set_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+    )
+    location_set_at = models.DateTimeField(null=True, blank=True)
     is_available = models.BooleanField(default=True)
     vehicle_type = models.CharField(max_length=50, blank=True, null=True)
     vehicle_number = models.CharField(max_length=50, blank=True, null=True)
@@ -147,6 +433,14 @@ class UserProfile(models.Model):
         max_digits=10, decimal_places=2, null=True, blank=True,
         help_text="Custom per-bottle price for this customer; "
                   "falls back to the standard price when empty",
+    )
+    discount_category = models.ForeignKey(
+        'DiscountCategory', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='customers',
+        help_text="Discount tier applied automatically whenever this customer "
+                  "is billed. PROTECT: a category in use cannot be deleted, "
+                  "only reassigned or deactivated. Never exposed to the "
+                  "customer's own API surface.",
     )
     account_balance = models.DecimalField(
         max_digits=12, decimal_places=2, default=0,
@@ -191,8 +485,13 @@ class UserProfile(models.Model):
         return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
     def compose_address(self):
-        """Join the structured parts into a single human-readable address line."""
-        parts = [self.house_number, self.portion, self.block, self.area]
+        """Join the structured parts into a single human-readable address line.
+
+        Portion is stored as a key ('first_floor') but written out as its label
+        ('1st Floor') — the composed line is what riders and PDFs read.
+        """
+        portion = PORTION_LABELS.get(self.portion, self.portion)
+        parts = [self.house_number, portion, self.block, self.area]
         return ', '.join(p.strip() for p in parts if p and p.strip())
 
     def sync_address(self):
@@ -201,6 +500,23 @@ class UserProfile(models.Model):
         if composed:
             self.address = composed
         return self.address
+
+    def set_customer_pin(self, latitude, longitude, source, set_by):
+        """
+        Move (or clear) this customer's delivery pin, stamping whose claim it
+        is. Does not save — callers save with update_fields=CUSTOMER_PIN_FIELDS
+        so a stale in-memory copy cannot write back unrelated columns.
+        """
+        self.customer_latitude = latitude
+        self.customer_longitude = longitude
+        if latitude is None and longitude is None:
+            self.location_source = None
+            self.location_set_by = None
+            self.location_set_at = None
+        else:
+            self.location_source = source
+            self.location_set_by = set_by
+            self.location_set_at = timezone.now()
 
     def __str__(self):
         return f"{self.user.username} - {self.get_user_type_display()}"
@@ -289,12 +605,6 @@ class NotificationTemplate(models.Model):
 # is well clear of the 60-second default ping interval, so a rider in a basement
 # or under a flyover does not flicker stale between refreshes.
 LOCATION_STALE_AFTER_MINUTES = 10
-
-# Coordinates are Decimal, never float: MySQL float rounding is visible on a map
-# as a pin that jumps a few metres every time the row is read back. Six decimal
-# places is ~11 cm, finer than any consumer GPS.
-LATITUDE_VALIDATORS = [MinValueValidator(Decimal('-90')), MaxValueValidator(Decimal('90'))]
-LONGITUDE_VALIDATORS = [MinValueValidator(Decimal('-180')), MaxValueValidator(Decimal('180'))]
 
 
 class TrackingSettings(models.Model):
@@ -412,7 +722,9 @@ class RiderLocation(models.Model):
     def minutes_ago(self):
         if not self.recorded_at:
             return None
-        return round((timezone.now() - self.recorded_at).total_seconds() / 60, 1)
+        # Clamped at 0: a device clock a little ahead of ours (within the
+        # serializer's skew tolerance) must not surface as "-0.4 minutes ago".
+        return max(round((timezone.now() - self.recorded_at).total_seconds() / 60, 1), 0.0)
 
 
 class RiderLocationPing(models.Model):

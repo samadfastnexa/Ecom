@@ -17,7 +17,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from .models import LedgerEntry
+from .models import LedgerEntry, LedgerSettings
 
 ZERO = Decimal('0')
 
@@ -32,6 +32,9 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
     document_label = serializers.CharField(read_only=True)
     debit = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     credit = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    # Blank/null on rows without a discount — the statement leaves the Gross /
+    # Discount columns empty rather than printing 0.00.
+    discount_category_name = serializers.CharField(read_only=True)
     source = serializers.CharField(read_only=True)
     is_reversal = serializers.BooleanField(read_only=True)
     is_reversed = serializers.BooleanField(read_only=True)
@@ -53,6 +56,7 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
             'id', 'entry_date', 'entry_type', 'entry_type_display',
             'description', 'item_label', 'quantity', 'unit_price',
             'document_number', 'document_label',
+            'gross_amount', 'discount_amount', 'discount_category_name',
             'amount', 'debit', 'credit', 'running_balance', 'balance_after',
             'bottles_out', 'bottles_in', 'stock_after',
             'payment_method', 'reference', 'receipt_number',
@@ -123,3 +127,20 @@ class ReceivableSerializer(serializers.Serializer):
     bottles_held = serializers.IntegerField()
     last_entry_date = serializers.DateField(allow_null=True)
     last_payment_date = serializers.DateField(allow_null=True)
+
+
+class BusinessSettingsSerializer(serializers.ModelSerializer):
+    """The admin-editable slice of LedgerSettings exposed over the API.
+
+    Deliberately narrow: the rest of the singleton (ledger kill switches, start
+    date) changes how money is posted and stays in the Django admin, behind a
+    deploy-level login rather than an app screen.
+    """
+
+    class Meta:
+        model = LedgerSettings
+        fields = (
+            'share_location_label',
+            'payment_account_title', 'payment_account_number',
+            'payment_bank_name', 'payment_qr', 'payment_instructions',
+        )

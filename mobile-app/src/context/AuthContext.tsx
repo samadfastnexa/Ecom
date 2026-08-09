@@ -13,6 +13,13 @@ interface User {
   user_type?: 'customer' | 'delivery_boy' | 'staff' | 'admin';
   phone_number?: string;
   address?: string;
+  /** This user's own map pin. Numbers, not strings — UserSerializer sets
+   *  coerce_to_string=False for both. Null until one has been dropped. */
+  customer_latitude?: number | null;
+  customer_longitude?: number | null;
+  /** What an admin's work place is called when its location is shared. Empty
+   *  until set; callers fall back to the business name. */
+  work_place_label?: string;
   is_available?: boolean;
   vehicle_type?: string;
   vehicle_number?: string;

@@ -1,5 +1,6 @@
-import { apiDownload, apiFetch } from "./client";
+import { apiDownload, apiFetch, apiShare } from "./client";
 import type {
+  BusinessInfo,
   LedgerEntry,
   LedgerStatement,
   LedgerSummary,
@@ -27,6 +28,21 @@ function query(filters: StatementFilters = {}): string {
  * and matches the printed statement, so never mix the two.
  */
 export const ledgerApi = {
+  /** Business identity. Readable signed-out — it is what the storefront's
+   *  "contact us" button uses — so no `auth` here. */
+  business() {
+    return apiFetch<BusinessInfo>("/ledger/business/");
+  },
+
+  /** Admin-only; the server 403s anyone else on the same URL. */
+  updateBusiness(patch: Partial<Pick<BusinessInfo, "share_location_label">>) {
+    return apiFetch<BusinessInfo>("/ledger/business/", {
+      method: "PATCH",
+      body: patch,
+      auth: true,
+    });
+  },
+
   receivables(opts: { search?: string; only_owing?: boolean } = {}) {
     const params = new URLSearchParams();
     if (opts.search) params.set("search", opts.search);
@@ -86,6 +102,25 @@ export const ledgerApi = {
     return apiDownload(
       `/ledger/customers/${userId}/statement.pdf${query(filters)}`,
       `statement-${username}.pdf`
+    );
+  },
+
+  /**
+   * Offer the statement to the OS share sheet (WhatsApp, email, anything).
+   * Falls back to a download where the browser cannot share files, which is
+   * most desktops — see apiShare.
+   */
+  shareStatement(
+    userId: number,
+    username: string,
+    customerName: string,
+    filters: StatementFilters = {}
+  ) {
+    return apiShare(
+      `/ledger/customers/${userId}/statement.pdf${query(filters)}`,
+      `statement-${username}.pdf`,
+      `Statement — ${customerName}`,
+      `Account statement for ${customerName}.`
     );
   },
 };

@@ -17,6 +17,7 @@ from . import service
 from .models import LedgerEntry
 from .permissions import CanRecordPayment, CanViewLedger, CanVoidLedger
 from .serializers import (
+    BusinessSettingsSerializer,
     LedgerEntrySerializer,
     ManualEntrySerializer,
     ReceivableSerializer,
@@ -61,7 +62,7 @@ def _attach_pdf(response, filename):
 
 # ─── Public business contact ─────────────────────────────────────────────────
 
-@api_view(['GET'])
+@api_view(['GET', 'PATCH'])
 @permission_classes([AllowAny])
 def business_info(request):
     """
@@ -69,15 +70,64 @@ def business_info(request):
     button. Public on purpose — it is the same information printed on every
     receipt — and served from the database so the number can be changed from
     the admin panel without shipping a new app build.
+
+    PATCH edits the admin-configurable slice. The permission is checked in the
+    body rather than via permission_classes because GET on this same URL must
+    keep working for signed-out customers.
     """
     from .models import LedgerSettings
 
     cfg = LedgerSettings.load()
-    return Response({
+
+    if request.method == 'PATCH':
+        if not (request.user and request.user.is_authenticated and request.user.is_staff):
+            return Response(
+                {'detail': 'Administrators only.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = BusinessSettingsSerializer(cfg, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        cfg = serializer.save()
+        activity_log(
+            request.user, 'settings', 'Business Settings Updated',
+            target_type='settings', target_id=cfg.pk, target_label='Business',
+        )
+
+    payload = {
         'name': cfg.business_name,
         'phone': cfg.business_phone,
         'address': cfg.business_address,
-    })
+        'share_location_label': cfg.share_location_label,
+    }
+    # Contact details are public (the storefront's "contact us" button needs
+    # them signed-out). The bank account is not: it is given out freely to
+    # customers, but there is no reason to leave it on an anonymous endpoint for
+    # anything on the internet to scrape. Any signed-in user may see it — riders
+    # quote it at the door, customers pay into it.
+    if request.user and request.user.is_authenticated:
+        payload.update(_payment_details_payload(cfg, request))
+    return Response(payload)
+
+
+def _payment_details_payload(cfg, request):
+    """The account a customer can transfer to, as the rider app renders it.
+
+    `has_details` saves every caller from re-deriving "is this configured at
+    all" — the rider page shows a set-up-required message rather than a card of
+    blank rows when the office has not filled these in.
+    """
+    qr = cfg.payment_qr
+    return {
+        'payment_account_title': cfg.payment_account_title,
+        'payment_account_number': cfg.payment_account_number,
+        'payment_bank_name': cfg.payment_bank_name,
+        # Absolute so the mobile app can load it without knowing the API host.
+        'payment_qr': request.build_absolute_uri(qr.url) if qr else None,
+        'payment_instructions': cfg.payment_instructions,
+        'has_payment_details': bool(
+            cfg.payment_account_number or cfg.payment_account_title or qr
+        ),
+    }
 
 
 # ─── Receivables ─────────────────────────────────────────────────────────────

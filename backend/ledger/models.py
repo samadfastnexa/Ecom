@@ -44,9 +44,16 @@ class LedgerEntry(models.Model):
     #: Types an admin may post by hand via the manual-entry endpoint.
     MANUAL_TYPES = (OPENING, ADJUSTMENT, REFUND)
 
-    # The business collects cash only.
+    # How the money actually arrived. 'Cash' is what a rider takes at the door;
+    # 'Online' covers a bank transfer or wallet payment made against the QR /
+    # account details the office publishes. The distinction matters at
+    # reconciliation — cash has to be handed in, an online payment does not.
+    CASH = 'Cash'
+    ONLINE = 'Online'
+
     PAYMENT_METHODS = [
-        ('Cash', 'Cash'),
+        (CASH, 'Cash'),
+        (ONLINE, 'Online Transfer'),
     ]
 
     # A journal must never lose rows, so the customer cannot be deleted out from
@@ -79,6 +86,18 @@ class LedgerEntry(models.Model):
     document_number = models.CharField(
         max_length=32, blank=True, db_index=True,
         help_text="Bill / voucher number shown on the statement.",
+    )
+    # Display-only discount breakdown of a charge. `amount` stays the NET
+    # signed figure — the SUM(amount)==account_balance invariant does not know
+    # these columns exist. Null (not 0.00) when the charge carried no discount,
+    # so statements can leave the columns blank.
+    gross_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True,
+        help_text="Line total before discount; set only on discounted charges.",
+    )
+    discount_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True,
+        help_text="Discount included in `amount`; set only on discounted charges.",
     )
 
     # ── Returnable bottle stock ──────────────────────────────────────────────
@@ -212,6 +231,18 @@ class LedgerEntry(models.Model):
         return 'manual'
 
     @property
+    def discount_category_name(self):
+        """
+        Category label for the statement's discount column, e.g. 'Wholesale'.
+        Read from the source's frozen snapshot rather than stored again here;
+        blank when the source is gone or carried no discount.
+        """
+        if not self.discount_amount:
+            return ''
+        source = self.order if self.order_id else self.delivery_record
+        return getattr(source, 'discount_category_name', '') if source else ''
+
+    @property
     def is_reversal(self):
         return self.reverses_id is not None
 
@@ -262,6 +293,45 @@ class LedgerSettings(models.Model):
     receipt_footer = models.CharField(
         max_length=255, blank=True,
         default='Thank you for your business.',
+    )
+    # The name that travels with a work-place location shared out of the app.
+    # Separate from business_name because that one is printed on every receipt
+    # and PDF: renaming the business to relabel a shared map pin would be the
+    # tail wagging the dog. Blank falls back to "<business_name> — work place".
+    share_location_label = models.CharField(
+        max_length=120, blank=True, default='',
+        help_text="Default name shown when an admin shares a work-place "
+                  "location. Individual admins can override it on their own "
+                  "profile. Blank uses \"<business name> — work place\".",
+    )
+
+    # ── Online payment details ───────────────────────────────────────────────
+    # What a rider shows a customer who wants to pay by transfer instead of
+    # cash. One business account, not one per rider: the money is the company's,
+    # and a rider's own account number on a customer's screen is how collections
+    # go missing. The rider app renders these read-only.
+    payment_account_title = models.CharField(
+        max_length=120, blank=True, default='',
+        help_text="Account holder's name, exactly as the bank shows it — a "
+                  "transfer to a mistyped title bounces.",
+    )
+    payment_account_number = models.CharField(
+        max_length=64, blank=True, default='',
+        help_text="Account number or IBAN.",
+    )
+    payment_bank_name = models.CharField(
+        max_length=120, blank=True, default='',
+        help_text="Bank or wallet, e.g. Meezan Bank, JazzCash, Easypaisa.",
+    )
+    payment_qr = models.ImageField(
+        upload_to='ledger/payment/', blank=True, null=True,
+        help_text="QR the customer scans to pay. Optional — the account "
+                  "details alone are enough to take a transfer.",
+    )
+    payment_instructions = models.CharField(
+        max_length=255, blank=True, default='',
+        help_text="Anything the customer must do after paying, e.g. 'Send the "
+                  "receipt screenshot to the rider before he leaves.'",
     )
 
     ledger_start_date = models.DateField(
