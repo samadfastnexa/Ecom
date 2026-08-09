@@ -5,6 +5,8 @@ export type StaffRoleFilter = 'all' | 'riders' | 'staff';
 export type MainTabParamList = {
   Home: undefined;
   Orders: undefined;
+  /** Riders only — the account customers can transfer into. */
+  RiderPayment: undefined;
   Profile: undefined;
 };
 
@@ -24,6 +26,8 @@ export type RootStackParamList = {
   ProductDetail: { product: Product };
   Cart: undefined;
   Checkout: undefined;
+  /** The customer's saved delivery addresses, opened from Profile. */
+  AddressBook: undefined;
   Complaints: undefined;
   OrderSuccess: { orderId: number; total: number; paymentMethod: string };
   DeliveryOrderDetail: { order: any };

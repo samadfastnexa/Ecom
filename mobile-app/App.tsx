@@ -12,8 +12,10 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { ProductDetailScreen } from './src/screens/ProductDetailScreen';
 import { CartScreen } from './src/screens/CartScreen';
 import { CheckoutScreen } from './src/screens/CheckoutScreen';
+import { AddressBookScreen } from './src/screens/AddressBookScreen';
 import { OrderHistoryScreen } from './src/screens/OrderHistoryScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
+import { RiderPaymentScreen } from './src/screens/RiderPaymentScreen';
 import { ComplaintScreen } from './src/screens/ComplaintScreen';
 import { OrderSuccessScreen } from './src/screens/OrderSuccessScreen';
 import { DeliveryOrderDetailScreen } from './src/screens/DeliveryOrderDetailScreen';
@@ -40,6 +42,7 @@ import { RootStackParamList, MainTabParamList, AdminTabParamList } from './src/t
 import { CartProvider, useCart } from './src/context/CartContext';
 import { AuthProvider, AuthContext } from './src/context/AuthContext';
 import { LanguageProvider } from './src/context/LanguageContext';
+import { FloatingContactButton } from './src/components/FloatingContactButton';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -140,6 +143,7 @@ const MainTabs = () => {
           let iconName: keyof typeof Ionicons.glyphMap = 'home';
           if (route.name === 'Home') iconName = focused ? 'storefront' : 'storefront-outline';
           else if (route.name === 'Orders') iconName = focused ? (isDeliveryBoy ? 'bicycle' : 'receipt') : (isDeliveryBoy ? 'bicycle-outline' : 'receipt-outline');
+          else if (route.name === 'RiderPayment') iconName = focused ? 'qr-code' : 'qr-code-outline';
           else if (route.name === 'Profile') iconName = focused ? 'person-circle' : 'person-circle-outline';
           return <Ionicons name={iconName} size={size} color={color} />;
         },
@@ -165,6 +169,15 @@ const MainTabs = () => {
         component={OrderHistoryScreen}
         options={{ tabBarLabel: isDeliveryBoy ? 'Deliveries' : 'Orders' }}
       />
+      {/* Riders only. A customer who wants to pay by transfer asks at the door,
+          so the account has to be one tap away — not buried behind an order. */}
+      {isDeliveryBoy && (
+        <Tab.Screen
+          name="RiderPayment"
+          component={RiderPaymentScreen}
+          options={{ tabBarLabel: 'Pay' }}
+        />
+      )}
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
@@ -254,6 +267,9 @@ const AppContent = () => {
                 />
                 <Stack.Screen name="Cart"         component={CartScreen}         options={{ headerTitle: 'My Cart' }} />
                 <Stack.Screen name="Checkout"     component={CheckoutScreen}     options={{ headerTitle: 'Checkout' }} />
+                {/* Customers only: riders and admins deliver to addresses,
+                    they do not keep one of their own. */}
+                <Stack.Screen name="AddressBook"  component={AddressBookScreen}  options={{ headerTitle: 'Delivery Addresses' }} />
                 <Stack.Screen name="OrderSuccess" component={OrderSuccessScreen} options={{ headerTitle: 'Order Confirmed', headerLeft: () => null }} />
               </>
             )}
@@ -286,6 +302,12 @@ const AppContent = () => {
           </>
         )}
       </Stack.Navigator>
+
+      {/* Floats above every customer and rider screen. Admins are the one
+          exclusion: they are the people being contacted, and the button would
+          sit on top of the dense admin tables. Mounted inside
+          NavigationContainer so it can route to the Complaints screen. */}
+      {user && !isAdmin && <FloatingContactButton />}
     </NavigationContainer>
   );
 };

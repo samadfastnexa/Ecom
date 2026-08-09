@@ -7,6 +7,10 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { updateOrderStatus, getDeliveryStatuses, DeliveryStatus } from '../services/orderService';
 import { startRiderTracking } from '../services/locationService';
+import { OrderLocationMap } from '../components/OrderLocationMap';
+import { KeyboardAwareScrollView } from '../components/KeyboardAwareScrollView';
+import { canWhatsApp, openWhatsApp } from '../utils/whatsapp';
+import { callNumber, canCall } from '../utils/phone';
 
 interface RouteParams {
   order: any;
@@ -26,7 +30,17 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
   const { order } = route.params as RouteParams;
 
   const isStatusLocked = !!(order.delivery_status_updated_at);
+  // A completed delivery is final — the server rejects every write to it, so
+  // the screen must not offer any. Distinct from isStatusLocked, which only
+  // means "the status has been set once" and still allows the note to be fixed.
+  const isDelivered = order.delivery_status === 'Delivered' || order.status === 'Delivered';
   const totalBottles = order.items?.reduce((sum: number, item: any) => sum + item.quantity, 0) || 0;
+
+  // The rider serializer sends a `customer` block — name, phone, balance —
+  // built for exactly this screen. Fall back to the bare username for anything
+  // served by an older build that predates it.
+  const customerName: string = order.customer?.name || order.user || 'Customer';
+  const customerPhone: string | null = order.customer?.phone_number ?? order.guest_phone ?? null;
 
   const [deliveryStatuses, setDeliveryStatuses] = useState<DeliveryStatus[]>([]);
   const [loadingStatuses, setLoadingStatuses] = useState(true);
@@ -115,16 +129,37 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <KeyboardAwareScrollView style={styles.container} extraBottomSpace={32}>
       {/* ── Address hero ─────────────────────────────────────────── */}
       <View style={styles.addressCard}>
         <View style={styles.addressIconWrap}>
           <Ionicons name="location" size={22} color="#fff" />
         </View>
         <View style={styles.addressBody}>
-          <Text style={styles.addressLabel}>Delivery Address</Text>
+          <View style={styles.addressLabelRow}>
+            <Text style={styles.addressLabel}>Delivery Address</Text>
+            {!!order.shipping_label && (
+              <View style={styles.labelChip}>
+                <Text style={styles.labelChipText}>{order.shipping_label}</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.addressText}>{order.shipping_address || '—'}</Text>
         </View>
+      </View>
+
+      {/* ── Map pin ───────────────────────────────────────────────
+          A rider at the gate needs the pin, not the wording of the address, so
+          the map and Navigate sit directly under the hero — above the order
+          details they only read once they have arrived. */}
+      <View style={styles.card}>
+        <OrderLocationMap
+          orderId={order.id}
+          latitude={order.shipping_latitude}
+          longitude={order.shipping_longitude}
+          label={order.shipping_label}
+          variant="rider"
+        />
       </View>
 
       {/* ── Order summary ─────────────────────────────────────────── */}
@@ -134,8 +169,61 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
           <Text style={styles.orderAmount}>PKR {order.total_price}</Text>
         </View>
         <Text style={styles.customerText}>
-          <Ionicons name="person-outline" size={13} color="#999" /> {order.user}
+          <Ionicons name="person-outline" size={13} color="#999" /> {customerName}
         </Text>
+      </View>
+
+      {/* ── Contact ───────────────────────────────────────────────────
+          A rider at a locked gate needs the number in one tap, and which app
+          to use is not ours to decide: WhatsApp is free but the customer may
+          not have it or may not be online, so the SIM is always offered too.
+          Guest phone-in orders carry their number here as well. */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Customer</Text>
+        <View style={styles.contactRow}>
+          <View style={styles.contactBody}>
+            <Text style={styles.contactName}>{customerName}</Text>
+            <Text style={[styles.contactPhone, !customerPhone && styles.contactPhoneMissing]}>
+              {customerPhone || 'No phone number on this order'}
+            </Text>
+          </View>
+        </View>
+
+        {canCall(customerPhone) || canWhatsApp(customerPhone) ? (
+          <View style={styles.contactActions}>
+            {canCall(customerPhone) && (
+              <TouchableOpacity
+                style={[styles.contactBtn, styles.callBtn]}
+                onPress={() => callNumber(customerPhone)}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={`Call ${customerName}`}
+              >
+                <Ionicons name="call" size={17} color="#fff" />
+                <Text style={styles.contactBtnText}>Call</Text>
+              </TouchableOpacity>
+            )}
+            {canWhatsApp(customerPhone) && (
+              <TouchableOpacity
+                style={[styles.contactBtn, styles.waBtn]}
+                onPress={() => openWhatsApp(
+                  customerPhone,
+                  `Hello ${customerName}, I am on my way with your order #${order.id}.`,
+                )}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel={`WhatsApp ${customerName}`}
+              >
+                <Ionicons name="logo-whatsapp" size={17} color="#fff" />
+                <Text style={styles.contactBtnText}>WhatsApp</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          <Text style={styles.contactHint}>
+            Ask the office for a number if you cannot find the address.
+          </Text>
+        )}
       </View>
 
       {/* ── Products ─────────────────────────────────────────────── */}
@@ -161,7 +249,18 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
         <Text style={styles.sectionTitle}>Delivery Details</Text>
 
         {/* Locked warning */}
-        {isStatusLocked && (
+        {isDelivered ? (
+          <View style={styles.warningBox}>
+            <Text style={styles.warningIcon}>✅</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.warningTitle}>Delivered</Text>
+              <Text style={styles.warningText}>
+                This delivery is complete. Nothing on it can be changed now —
+                contact the office if something needs correcting.
+              </Text>
+            </View>
+          </View>
+        ) : isStatusLocked ? (
           <View style={styles.warningBox}>
             <Text style={styles.warningIcon}>🔒</Text>
             <View style={{ flex: 1 }}>
@@ -171,7 +270,7 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
               </Text>
             </View>
           </View>
-        )}
+        ) : null}
 
         {/* Delivery status */}
         {isStatusLocked ? (
@@ -254,37 +353,55 @@ export const DeliveryOrderDetailScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Notes */}
+        {/* Delivery note — shared with the office both ways: their instructions
+            for this drop arrive here, and what the rider types goes back to
+            them. The customer never sees either. */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>{isStatusLocked ? 'Notes / Comments' : 'Notes (Optional)'}</Text>
+          <Text style={styles.label}>Delivery note</Text>
+          <Text style={styles.hint}>
+            {isDelivered
+              ? 'This is what was recorded at the door.'
+              : isStatusLocked
+                ? 'The status is locked, but you can still correct this note.'
+                : 'Instructions from the office appear here. Add what happened at the door.'}
+          </Text>
           <TextInput
-            style={[styles.input, styles.textArea]}
+            style={[styles.input, styles.textArea, isDelivered && styles.inputReadOnly]}
             value={notes}
             onChangeText={setNotes}
-            placeholder={isStatusLocked ? 'Add comments…' : 'Add any notes…'}
+            editable={!isDelivered}
+            placeholder="Left with the guard · Customer not home · Paid in cash"
+            placeholderTextColor="#aaa"
             multiline
             numberOfLines={3}
+            maxLength={500}
           />
+          <Text style={styles.hintBelow}>Only you and the office can see this.</Text>
         </View>
 
-        <TouchableOpacity
-          style={[
-            styles.submitButton,
-            isDelivering && styles.deliverButton,
-            loading && styles.submitButtonDisabled,
-          ]}
-          onPress={confirmSubmit}
-          disabled={loading}
-        >
-          {isDelivering && !loading && (
-            <Ionicons name="checkmark-circle" size={19} color="#fff" />
-          )}
-          <Text style={styles.submitButtonText}>
-            {loading ? 'Updating…' : isStatusLocked ? 'Update Notes' : isDelivering ? 'Delivered' : 'Submit Update'}
-          </Text>
-        </TouchableOpacity>
+        {/* No submit once delivered — the server rejects every write to a
+            completed delivery, so offering the button would only produce an
+            error the rider can do nothing about. */}
+        {!isDelivered && (
+          <TouchableOpacity
+            style={[
+              styles.submitButton,
+              isDelivering && styles.deliverButton,
+              loading && styles.submitButtonDisabled,
+            ]}
+            onPress={confirmSubmit}
+            disabled={loading}
+          >
+            {isDelivering && !loading && (
+              <Ionicons name="checkmark-circle" size={19} color="#fff" />
+            )}
+            <Text style={styles.submitButtonText}>
+              {loading ? 'Updating…' : isStatusLocked ? 'Update Notes' : isDelivering ? 'Delivered' : 'Submit Update'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 };
 
@@ -314,7 +431,13 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   addressBody: { flex: 1 },
-  addressLabel: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 },
+  addressLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  addressLabel: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: 0.8 },
+  labelChip: {
+    backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 20,
+    paddingHorizontal: 8, paddingVertical: 2,
+  },
+  labelChipText: { fontSize: 11, fontWeight: '700', color: '#fff' },
   addressText: { fontSize: 16, fontWeight: '700', color: '#fff', lineHeight: 22 },
 
   // Cards
@@ -325,6 +448,26 @@ const styles = StyleSheet.create({
   orderId: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   orderAmount: { fontSize: 18, fontWeight: 'bold', color: '#2ecc71' },
   customerText: { fontSize: 13, color: '#888', marginTop: 2 },
+
+  // ── Customer contact ──────────────────────────────────────────────────────
+  contactRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 },
+  contactBody: { flex: 1 },
+  contactName: { fontSize: 15, fontWeight: '700', color: '#1a2530' },
+  // Tabular figures so a rider reading a number aloud does not lose their place.
+  contactPhone: {
+    fontSize: 15, color: '#374857', marginTop: 3,
+    letterSpacing: 0.4, fontVariant: ['tabular-nums'],
+  },
+  contactPhoneMissing: { fontSize: 13, color: '#a0a8b0', letterSpacing: 0 },
+  contactActions: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  contactBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 7, paddingVertical: 12, borderRadius: 11,
+  },
+  callBtn: { backgroundColor: '#0A84FF' },
+  waBtn: { backgroundColor: '#25D366' },
+  contactBtnText: { color: '#fff', fontSize: 14.5, fontWeight: '700' },
+  contactHint: { fontSize: 12.5, color: '#8a929b', marginTop: 10, lineHeight: 17 },
 
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 14 },
 
@@ -337,8 +480,11 @@ const styles = StyleSheet.create({
 
   inputGroup: { marginBottom: 18 },
   label: { fontSize: 14, fontWeight: '600', color: '#444', marginBottom: 8 },
+  hint: { fontSize: 12, color: '#8a929b', marginBottom: 8, lineHeight: 17 },
+  hintBelow: { fontSize: 12, color: '#8a929b', marginTop: 8, lineHeight: 17 },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 12, fontSize: 16, backgroundColor: '#fafafa' },
   textArea: { height: 80, textAlignVertical: 'top' },
+  inputReadOnly: { backgroundColor: '#f0f0f0', color: '#666', borderColor: 'transparent' },
 
   // Payment options
   paymentRow: { flexDirection: 'row', gap: 8 },

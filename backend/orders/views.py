@@ -1,16 +1,23 @@
+from datetime import datetime
+
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.decorators import api_view, permission_classes
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.db.models import Q, Sum, Count
-from .models import Order, DeliveryStatus, OrderItem
+from .models import Order, DeliveryStatus, OrderItem, CustomerVisit
 from .serializers import (
-    OrderSerializer, DeliveryStatusSerializer,
+    OrderSerializer, DeliveryStatusSerializer, DeliveryBoyOrderSerializer,
     AdminOrderSerializer, AdminOrderUpdateSerializer, AdminOrderCreateSerializer,
+    CustomerVisitSerializer, RiderVisitInputSerializer, rider_card_maps,
+    AdminDeliveryStatusSerializer,
 )
+from core.timeframes import scope_to_days
 from accounts.models import UserProfile
+from accounts.permissions import user_can_override_discount
 from activities.service import log as activity_log
 
 class OrderListCreateView(generics.ListCreateAPIView):
@@ -45,7 +52,7 @@ class IsDeliveryBoy(permissions.BasePermission):
 
 
 class DeliveryBoyOrderListView(generics.ListAPIView):
-    serializer_class = OrderSerializer
+    serializer_class = DeliveryBoyOrderSerializer
     permission_classes = [IsDeliveryBoy]
 
     def get_queryset(self):
@@ -54,19 +61,50 @@ class DeliveryBoyOrderListView(generics.ListAPIView):
             assigned_delivery_boy=profile
         ).exclude(
             status__in=['Delivered', 'Cancelled']
+        ).select_related(
+            # assigned_delivery_boy is a UserProfile FK and its .user is read
+            # when serializing; without both, each order re-queries them.
+            'user', 'user__profile',
+            'assigned_delivery_boy', 'assigned_delivery_boy__user',
+        ).prefetch_related(
+            # The product serializer nests its gallery, so stopping the
+            # prefetch at the product costs one images query per order.
+            'items__product__images'
         ).order_by('-created_at')
+
+    def list(self, request, *args, **kwargs):
+        # The customer-card lookups are batched for the whole page here —
+        # a rider's list may hold dozens of orders and must stay O(1) queries.
+        orders = list(self.get_queryset())
+        context = self.get_serializer_context()
+        context['rider_card_maps'] = rider_card_maps(orders)
+        return Response(
+            DeliveryBoyOrderSerializer(orders, many=True, context=context).data
+        )
 
 
 class DeliveryBoyOrderDetailView(generics.RetrieveUpdateAPIView):
-    serializer_class = OrderSerializer
+    serializer_class = DeliveryBoyOrderSerializer
     permission_classes = [IsDeliveryBoy]
     lookup_field = 'id'
 
     def get_queryset(self):
-        return Order.objects.filter(assigned_delivery_boy=self.request.user.profile)
+        return Order.objects.filter(
+            assigned_delivery_boy=self.request.user.profile
+        ).select_related('user', 'user__profile').prefetch_related('items__product')
     
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
+
+        # A completed delivery is final. What the rider recorded at the door —
+        # the cash figure, the bottle count, the note — is the record of what
+        # happened, and letting any of it be rewritten afterwards would let the
+        # money move silently after the fact. Earlier statuses stay editable.
+        if instance.delivery_status == 'Delivered':
+            return Response(
+                {'error': 'This delivery is complete and can no longer be changed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Check if delivery status has been locked (already updated once)
         is_locked = instance.delivery_status_updated_at is not None
@@ -175,6 +213,64 @@ def update_availability(request):
         profile.save()
     return Response({'is_available': profile.is_available, 'message': 'Availability updated successfully'})
 
+class RiderVisitCreateView(APIView):
+    """
+    POST /api/orders/delivery/visits/ — the NO NEED / NO RESPONSE buttons.
+
+    Journals a doorstep outcome without touching the order status: the
+    business may re-attempt the delivery, so the order keeps its normal
+    lifecycle and the journal simply records what happened at the gate.
+    """
+    permission_classes = [IsDeliveryBoy]
+
+    def post(self, request):
+        payload = RiderVisitInputSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+
+        try:
+            order = Order.objects.select_related('user').get(pk=data['order'])
+        except Order.DoesNotExist:
+            return Response(
+                {'order': 'Unknown order.'}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        # The rider is request.user, never payload input — and they may only
+        # journal against an order that is currently theirs to attempt.
+        if order.assigned_delivery_boy_id != request.user.profile.id:
+            return Response(
+                {'detail': 'This order is not assigned to you.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if order.status in ('Delivered', 'Cancelled'):
+            return Response(
+                {'detail': f'This order is already {order.status.lower()}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if order.user_id is None:
+            return Response(
+                {'detail': 'Guest orders have no customer account to journal '
+                           'a visit against.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        visit = CustomerVisit.objects.create(
+            rider=request.user,
+            customer=order.user,
+            order=order,
+            outcome=data['outcome'],
+            note=data['note'],
+        )
+        activity_log(
+            request.user, 'rider', 'Visit Recorded',
+            target_type='order', target_id=order.id,
+            target_label=f'Order #{order.id}',
+            details={'customer': order.user.username, 'outcome': visit.outcome},
+        )
+        return Response(
+            CustomerVisitSerializer(visit).data, status=status.HTTP_201_CREATED,
+        )
+
+
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def delivery_status_list(request):
@@ -191,6 +287,43 @@ def delivery_status_list(request):
 class IsStaff(permissions.BasePermission):
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated and request.user.is_staff)
+
+
+class AdminDeliveryStatusListCreateView(generics.ListCreateAPIView):
+    """Staff-managed delivery statuses — includes retired ones.
+
+    Separate from `delivery_status_list` above, which riders read: that one is
+    filtered to active statuses and omits the on/off switch entirely.
+    """
+    permission_classes = [IsStaff]
+    serializer_class = AdminDeliveryStatusSerializer
+    queryset = DeliveryStatus.objects.all().order_by('order', 'name')
+    pagination_class = None
+
+
+class AdminDeliveryStatusDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsStaff]
+    serializer_class = AdminDeliveryStatusSerializer
+    queryset = DeliveryStatus.objects.all()
+
+    def destroy(self, request, *args, **kwargs):
+        """Refuse to delete a status any order has ever been given.
+
+        Orders store the status by name, so deleting the row would leave those
+        deliveries labelled with something nothing can explain. Deactivating
+        takes it off the rider's list while keeping the history readable.
+        """
+        instance = self.get_object()
+        in_use = Order.objects.filter(delivery_status=instance.name).count()
+        if in_use:
+            return Response(
+                {'detail': (
+                    f'{in_use} order(s) already use "{instance.name}". '
+                    'Turn it off instead of deleting it, so their history still reads correctly.'
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 class AdminOrderListView(generics.ListCreateAPIView):
@@ -221,15 +354,25 @@ class AdminOrderListView(generics.ListCreateAPIView):
                 Q(guest_phone__icontains=q) |
                 Q(shipping_address__icontains=q)
             )
-        if p.get('date_from'):
-            qs = qs.filter(created_at__date__gte=p['date_from'])
-        if p.get('date_to'):
-            qs = qs.filter(created_at__date__lte=p['date_to'])
+        qs = scope_to_days(
+            qs, 'created_at',
+            parse_date(p['date_from']) if p.get('date_from') else None,
+            parse_date(p['date_to']) if p.get('date_to') else None,
+        )
         if p.get('is_paid') in ('true', 'false'):
             qs = qs.filter(is_paid=(p['is_paid'] == 'true'))
         return qs
 
     def create(self, request, *args, **kwargs):
+        # The auto-applied discount is untouchable without the dedicated
+        # permission — is_staff alone is deliberately not enough.
+        if request.data.get('discount_override') not in (None, ''):
+            if not user_can_override_discount(request.user):
+                return Response(
+                    {'detail': 'You do not have permission to override the discount.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
         serializer = AdminOrderCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
@@ -245,6 +388,20 @@ class AdminOrderListView(generics.ListCreateAPIView):
             target_label=f'Order #{order.id}',
             details={'status': order.status, 'total': str(order.total_price)},
         )
+        auto_discount = getattr(order, '_auto_discount_amount', None)
+        if auto_discount is not None:
+            # Every override is audited: who, what billing computed, what they
+            # replaced it with.
+            activity_log(
+                request.user, 'order', 'Discount Overridden',
+                target_type='order', target_id=order.id,
+                target_label=f'Order #{order.id}',
+                details={
+                    'customer': order.user.username if order.user else (order.guest_name or 'Guest'),
+                    'auto_discount': str(auto_discount),
+                    'override_discount': str(order.discount_amount),
+                },
+            )
         return Response(
             AdminOrderSerializer(order, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
@@ -311,14 +468,113 @@ class AdminOrderUpdateView(generics.UpdateAPIView):
         return Response(AdminOrderSerializer(instance, context={'request': request}).data)
 
 
+class AdminVisitListView(APIView):
+    """
+    GET /api/orders/admin/visits/ — the visit journal for staff.
+
+    Query params:
+        customer  — User id
+        rider     — User id
+        date_from / date_to — YYYY-MM-DD, on the visit's creation date
+        limit     — default 100, max 500
+        offset    — default 0
+    """
+    permission_classes = [IsStaff]
+
+    DEFAULT_LIMIT = 100
+    MAX_LIMIT = 500
+
+    def get(self, request):
+        qs = (
+            CustomerVisit.objects
+            .select_related('rider', 'customer', 'order')
+            .order_by('-created_at')
+        )
+        p = request.query_params
+        for param, field in (('customer', 'customer_id'), ('rider', 'rider_id')):
+            if p.get(param):
+                try:
+                    qs = qs.filter(**{field: int(p[param])})
+                except (TypeError, ValueError):
+                    return Response(
+                        {param: 'Expected a user id.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+        days = {}
+        for param in ('date_from', 'date_to'):
+            if p.get(param):
+                try:
+                    days[param] = datetime.strptime(p[param], '%Y-%m-%d').date()
+                except ValueError:
+                    return Response(
+                        {param: 'Expected YYYY-MM-DD.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+        qs = scope_to_days(
+            qs, 'created_at', days.get('date_from'), days.get('date_to'),
+        )
+
+        total = qs.count()
+        try:
+            limit = min(int(p.get('limit', self.DEFAULT_LIMIT)), self.MAX_LIMIT)
+        except (TypeError, ValueError):
+            limit = self.DEFAULT_LIMIT
+        try:
+            offset = max(int(p.get('offset', 0)), 0)
+        except (TypeError, ValueError):
+            offset = 0
+
+        rows = qs[offset:offset + limit]
+        return Response({
+            'count': total,
+            'limit': limit,
+            'offset': offset,
+            'results': CustomerVisitSerializer(rows, many=True).data,
+        })
+
+
 class AdminOrderSummaryView(APIView):
+    """Headline order stats for the admin dashboard.
+
+    `date_from` / `date_to` (YYYY-MM-DD, both inclusive) scope every figure to
+    that window. Sending neither leaves the numbers all-time, so the callers
+    that predate the dashboard's period filter keep the totals they always
+    showed. `today_orders` / `today_revenue` are always literally today,
+    whatever range is asked for — they are a fixed reference point, not part of
+    the selected period.
+    """
     permission_classes = [IsStaff]
 
     def get(self, request):
-        today = timezone.now().date()
-        qs = Order.objects.filter(is_hidden=False)
-        today_qs = qs.filter(created_at__date=today)
-        today_revenue = today_qs.aggregate(rev=Sum('total_price'))['rev'] or 0
+        bounds = {}
+        for key in ('date_from', 'date_to'):
+            raw = (request.query_params.get(key) or '').strip()
+            if not raw:
+                continue
+            parsed = parse_date(raw)
+            if parsed is None:
+                return Response(
+                    {key: 'Expected a date in YYYY-MM-DD format.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            bounds[key] = parsed
+
+        if len(bounds) == 2 and bounds['date_from'] > bounds['date_to']:
+            return Response(
+                {'date_from': 'Start date cannot be after the end date.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        visible = Order.objects.filter(is_hidden=False)
+        qs = scope_to_days(
+            visible, 'created_at',
+            bounds.get('date_from'), bounds.get('date_to'),
+        )
+
+        # localdate(), not now().date(): the project runs in Asia/Karachi, so
+        # the UTC date would report yesterday's figures between midnight and 5am.
+        today = timezone.localdate()
+        today_qs = scope_to_days(visible, 'created_at', today, today)
 
         return Response({
             'total': qs.count(),
@@ -329,8 +585,10 @@ class AdminOrderSummaryView(APIView):
             'cancelled': qs.filter(status='Cancelled').count(),
             'paid_count': qs.filter(is_paid=True).count(),
             'unpaid_count': qs.filter(is_paid=False).count(),
+            # Revenue over the selected window; equals all-time when unscoped.
+            'revenue': float(qs.aggregate(rev=Sum('total_price'))['rev'] or 0),
             'today_orders': today_qs.count(),
-            'today_revenue': float(today_revenue),
+            'today_revenue': float(today_qs.aggregate(rev=Sum('total_price'))['rev'] or 0),
         })
 
 
